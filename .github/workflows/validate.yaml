@@ -108,7 +108,6 @@ jobs:
 
   fabric-operator:
     name: Fabric operator regression
-    if: ${{ hashFiles('operator/go.mod') != '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -117,8 +116,12 @@ jobs:
           go-version-file: operator/go.mod
           cache-dependency-path: operator/go.sum
       - name: Verify formatting, tests and generated artifacts
-        working-directory: operator
         run: |
+          if [ ! -f operator/go.mod ]; then
+            echo "Operator source not migrated yet; gate remains armed."
+            exit 0
+          fi
+          cd operator
           test -z "$(gofmt -l .)"
           go test -race ./...
           go vet ./...
@@ -127,7 +130,6 @@ jobs:
 
   fabric-webui:
     name: Fabric WebUI regression
-    if: ${{ hashFiles('webui/package.json') != '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -137,8 +139,12 @@ jobs:
           cache: npm
           cache-dependency-path: webui/package-lock.json
       - name: Test and build WebUI
-        working-directory: webui
         run: |
+          if [ ! -f webui/package.json ]; then
+            echo "WebUI source not migrated yet; gate remains armed."
+            exit 0
+          fi
+          cd webui
           npm ci
           npm test --if-present
           npm run typecheck --if-present
