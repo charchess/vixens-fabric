@@ -112,15 +112,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
+        if: ${{ hashFiles('operator/go.mod') != '' }}
         with:
           go-version-file: operator/go.mod
           cache-dependency-path: operator/go.sum
       - name: Verify formatting, tests and generated artifacts
+        if: ${{ hashFiles('operator/go.mod') != '' }}
         run: |
-          if [ ! -f operator/go.mod ]; then
-            echo "Operator source not migrated yet; gate remains armed."
-            exit 0
-          fi
           cd operator
           test -z "$(gofmt -l .)"
           go test -race ./...
@@ -134,16 +132,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
+        if: ${{ hashFiles('webui/package.json') != '' }}
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: webui/package-lock.json
       - name: Test and build WebUI
+        if: ${{ hashFiles('webui/package.json') != '' }}
         run: |
-          if [ ! -f webui/package.json ]; then
-            echo "WebUI source not migrated yet; gate remains armed."
-            exit 0
-          fi
           cd webui
           npm ci
           npm test --if-present
