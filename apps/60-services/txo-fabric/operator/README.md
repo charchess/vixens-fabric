@@ -1,0 +1,543 @@
+# TXO Fabric Operator
+
+`txo-fabric-operator` is the authoritative reconciler behind the Fabric CRDs.
+It replaces the temporary Kyverno `generate` provisioning POC; Kyverno remains a
+policy/admission engine, not the Fabric lifecycle engine.
+
+## API ownership
+
+- `TenantBundle` describes one Fabric Cell. `metadata.name` is the canonical
+  tenant slug; `spec.tenantId` is the immutable business identifier.
+- `AgentIdentity` describes who an agent is and references a `TenantBundle` by
+  name. Because the CR is cluster-scoped, `metadata.name` is the globally unique
+  Kubernetes object identity (recommended form: `<tenant>-<agentKey>`), while
+  `spec.agentKey` is the immutable tenant-local machine identity used for Hermes
+  profiles, runtime resource names and the default memory-bank key. This lets
+  different tenants each have an agent called `sales`, `assistant`, etc. without
+  colliding. `displayName` remains purely user-facing.
+- `AgentRuntimeProfile` describes how an agent runs (image, storage, resources,
+  Vixens scheduling and s6 compatibility). Runtime infrastructure is not part of
+  the identity object.
+- `PostgreSQLProfile` describes the platform-owned persistence implementation.
+  The first supported topology is `SharedCluster`: TXO references a GitOps-owned
+  CloudNativePG Cluster and owns only tenant `Database`, `DatabaseRole` and
+  credential Secret resources.
+- `AIGatewayProfile` describes the platform-owned tenant-facing inference gateway.
+  The v0.1 target is one tenant-local LiteLLM facade per `TenantBundle`, backed by
+  its own CloudNativePG `Database`/`DatabaseRole` binding for virtual keys,
+  metering, budgets and proxy state. The gateway database is deliberately distinct
+  from tenant application/Hindsight persistence.
+- `AICredentialBrokerProfile` describes an internal provider-credential broker.
+  The first implementation is a pinned CLIProxyAPI instance whose mutable OAuth
+  state is isolated from every AgentIdentity PVC.
+
+The operator rejects two live `AgentIdentity` resources that claim the same
+`tenantRef.name + agentKey` pair instead of letting them fight over the same
+Deployment/PVC/NetworkPolicy.
+
+The current controller reconciles:
+
+- tenant namespace + default-deny network baseline;
+- isolated Hermes PVC, Deployment and egress policy per `AgentIdentity`;
+- Shared PostgreSQL persistence through CloudNativePG `Database` and
+  `DatabaseRole` resources, with generated secret-backed credentials and required
+  extensions declared by `PostgreSQLProfile`;
+- explicit reclaim semantics for tenant PostgreSQL resources;
+- opt-in tenant-scoped CLIProxyAPI credential-broker substrate, including isolated
+  OAuth-state storage, generated internal/management credentials, Service and
+  NetworkPolicy;
+- tenant LiteLLM PostgreSQL state reconciliation through a dedicated
+  `postgresql-litellm` profile, generated database credentials, tenant-local
+  runtime Secret, restricted migration egress and pinned-image Prisma migration Job;
+- the LiteLLM serving/routing runtime remains deliberately fail-closed until the
+  next #3885 slice;
+- finalizers and standard Kubernetes status conditions;
+- a semantic runtime probe that verifies a real `hermes gateway run` process,
+  avoiding the prior `s6 + sleep infinity` false-positive readiness state.
+
+TXO never owns or mutates the referenced CloudNativePG `Cluster`; RBAC grants the
+operator read-only access to that dependency. Tenant database credentials are
+generated outside Git and never copied into Fabric status.
+
+Hindsight and its memory-bank lifecycle are reconciled by the current controller.
+Optional Fabric modules remain represented in `TenantBundle` but are reported as
+pending until their reconcilers are implemented. They must not be added as more
+Kyverno generate rules.
+
+The target tenant AI plane is tracked by #3885: tenant-local LiteLLM is the
+consumer-facing policy/model/metering facade, while CLIProxyAPI is an internal
+OAuth/subscription credential broker behind it. Existing tenants remain on the
+shared LiteLLM/OpenRouter path until the tenant-local plane passes physical
+acceptance. The direct-CPA smoke topology must not be promoted as the final
+architecture.
+
+## Explicit agent.chat grants from pinned IAM memberships — source-only #3996
+
+The only new explicit intent is `AgentIdentity.spec.access.chatIAMGroups`,
+a **set of keys** from the owning tenant's
+`TenantBundle.spec.humanAccess.web.iamGroups`. An absent/empty set **never
+grants chat**, even when `AgentIdentity.spec.humanAccess.enabled=true`, a
+workspace `access.userRef` exists or a workspace `access.groups` lists a
+collaboration area. Workspace keys are NOT IAM groups and usernames are NOT
+Fabric identities.
+
+The TenantBundle reconciler's existing gated path first verifies the pinned
+store/model, retained issuer-pinned UUID→Fabric ledger, authoritative Authentik
+group UUID and complete active-account membership, and converges
+`group#member` and `tenant#member` with a bounded lease. Only **then**
+it reads current AgentIdentity objects from the canonical Kubernetes control
+plane. A Ready, current-generation, non-deleting, UID-bearing agent with an
+explicit chatIAMGroups key may receive the relations:
+
+- `agent:<AgentIdentity.metadata.name>#tenant@tenant:<TenantBundle.spec.tenantId>`
+- `agent:<AgentIdentity.metadata.name>#chatter@group:txo-fabric-<tenant>-<key>#member`
+
+The authorizer must independently resolve the exact canonical AgentIdentity
+name/UID and current AgentIdentity readiness, tenant identity, group/source
+freshness and `agent.can_chat` Check in that tenant's **retained store/model**,
+plus effective policy. Only memberships in those Authentik groups can traverse
+the group-based relationship. The global OIDC `sub` and workspace
+`userRef` do **not** allocate a FabricUserID or grant rights.
+
+Each tenant's retained platform-only store/model binding also records the
+non-secret `agentChatBindings` inventory of AgentIdentity name and UID;
+a full desired-state reconcile of that inventory revokes departed or disabled
+agent relations, including after an AgentIdentity deletion or operator
+restart. The inventory is resourceVersion/CAS guarded; no status holds
+credentials, no tenant workload receives it. A mismatch of pinned AgentIdentity
+UID fails closed, never adopts a recreated agent implicitly. Partial failure
+keeps `OpenFGAAuthorizationReady=False` and retries; no positive lease.
+The existing 20-second refresh and 60-second membership lease bound
+staleness. OpenFGA write/read-back remains scoped to the tenant's pinned store
+and immutable model. A group with no enrolled immutable UUID does not
+create a chat grant.
+
+For the **existing hAIrem POC**, the 13 *already declared* AgentIdentity
+documents explicitly opt into the existing `client0` IAM group. The
+`charchess` workspace userRef and `admin` workspace group remain
+untouched. This is declarative intent only: **the real number of members
+and their UUID→Fabric bindings must be verified from Authentik and the
+retained ledger**, not inferred from Git. Adding a second member to
+`client0` would grant that member the explicitly group-scoped chat
+rights after reconciliation; limiting access permanently to a single
+human needs a further immutable-user binding/policy review.
+
+All feature gates remain OFF (`TXO_FABRIC_OPENFGA_STORES_ENABLED=false`,
+`TXO_FABRIC_PRIVATE_BRIDGE_ENABLED=false`,
+`TXO_WEBUI_BFF_BROWSER_ENABLED=false`). No FGA stores/tuples, Secret,
+ExternalSecret, API endpoint or credential is created by source publication;
+no Hermes API, browser routes, IAM enrollment or PVC is affected.
+
+## OpenFGA tenant store lifecycle — staged #3996
+
+The private Fabric-wide OpenFGA service is deployed independently from the operator. **One service does not mean one store**: the target is one authorization store per `TenantBundle.spec.tenantId` plus a separate platform-control store. A store name is derived only from the **immutable business tenant ID** (`txo-fabric-tenant-ten00001`), never the mutable display name, AgentIdentity name, username or browser input.
+
+`internal/openfga/stores.go` currently implements the platform-private store discovery/create/adoption primitive (including conflict detection, paginated discovery, deny-on-outage and no deletion on retries). Its tests use a fake HTTP transport to verify A/B tenant isolation, non-duplication and fail-closed behavior.
+
+The store client was initially introduced by #3997 and connected to `TenantBundleReconciler` by #3998, **behind a disabled-by-default feature gate**. The operator reads its credential from the OpenBao-synced Secret and persists a private store binding; it does not manage human group membership in Authentik. Neither store creation nor model publication grants users any permissions. The full #3996 activation, tuple reconciliation and physical revocation tests remain pending.
+
+Do not run manual per-client `fga store create` as a substitute for the remaining operator reconciliation. OpenFGA store names are not a uniqueness constraint: if duplicates already exist, the client refuses to select one, rather than guessing or deleting data.
+
+### Guarded TenantBundle → OpenFGA store binding
+
+The TenantBundle reconciler now has an intentionally **disabled-by-default** `TXO_FABRIC_OPENFGA_STORES_ENABLED=true` feature gate. This gate MUST NOT be enabled in the production operator Deployment until the same model and membership tuple reconciliation has been reviewed and physically proven. While disabled, `OpenFGAStoreReady=False/RolloutDisabled` is diagnostic and does not block the existing tenant's Ready status or create stores.
+
+Once deliberately enabled through GitOps, `TenantBundleReconciler`:
+- validates no two tenant objects share a `spec.tenantId`;
+- reads the private OpenBao-synced `txo-fabric-system/txo-openfga-runtime` service key without persisting/logging it;
+- adopts or provisions the uniquely named per-tenant OpenFGA store using `internal/openfga`;
+- persists the association in a **platform-only ConfigMap** `txo-fabric-system/txo-openfga-tenant-<tenantId>` with immutable tenant ID, name, original Kubernetes UID, and store ID (never API token);
+- verifies the association on repeated reconciliation; a deleted/recreated tenant UID, store change, or duplicate business ID is a **hard deny**, not an automatic cross-customer adoption;
+- sets `OpenFGAStoreReady` independently of the **still absent model/tuple grants**; outages/identity conflicts degrade only when the rollout gate is enabled.
+
+The binding is intentionally retained on tenant deletion so customer authorization history cannot be silently transferred to a new tenant. The final deletion/offboarding/revocation policy is tracked in #3996 and must be implemented *before* enabling the full integration. The operator NetworkPolicy admits only its outbound TCP 8080 path to the Fabric-owned OpenFGA pod; the existing OpenFGA ingress policy already only permits the operator.
+
+**No production promotion is required for this source-only guarded slice.** Follow WORKFLOW.md: an operator code merge creates a source-only dev tag and a separate generated image pin PR; only the completed, physically validated immutable pin candidate may be promoted with explicit operator approval.
+
+### Source-controlled OpenFGA model publication — #3996
+
+`apps/60-services/txo-fabric/openfga/model/model.fga` remains the **canonical Fabric authorization model**. The compiled API JSON artifact is embedded inside the operator as `internal/openfga/model.json`; OpenFGA model CI runs the upstream `fga model transform` command and rejects drift from the DSL. The existing two-tenant FGA test suite continues to validate positive/negative access.
+
+`internal/openfga/model.go` introduces an isolated model publication primitive:
+- compares the *latest* store model against the exact approved compiled definition;
+- returns the existing immutable model ID without writing another copy on retries;
+- writes the approved model **only when no model exists**, then verifies it is visible and latest;
+- rejects a foreign/newer model, model ID drift, API rejection/outage, or unsupported store ID, rather than automatically downgrading or upgrading an unknown authorization policy;
+- exposes a deterministic content fingerprint for a future stable per-tenant store/model mapping.
+
+### TenantBundle model ID + fingerprint binding — guarded #3996 slice
+
+`TenantBundleReconciler` now uses the private model API after verifying the tenant's retained store binding. With `TXO_FABRIC_OPENFGA_STORES_ENABLED=true` **only**, it validates or publishes the exact approved model and records `modelID` and `modelFingerprint` **in one ConfigMap update**, alongside the existing verified `tenantID`, `tenantUID` and `storeID`. It never rewrites a different model ID or a changed content fingerprint silently.
+
+Repeated reconciliation confirms the published latest model without unnecessary Kubernetes writes. A missing service credential, partial binding, fingerprint mismatch, foreign store, concurrent conflict, API outage or unknown model revision causes a hard failure and `OpenFGAModelReady=False`. No model exists in Fabric auth state until its ID and fingerprint are both verified. A crash between server publication and binding persistence is recoverable through verified adoption.
+
+Conditions deliberately distinguish `OpenFGAStoreReady`, `OpenFGAModelReady`, and `OpenFGAAuthorizationReady`. Even with store and model ready, `OpenFGAAuthorizationReady=False/RolloutDisabled` while the flag remains off. With an explicit *test-only* gate, this increment can reconcile only tenant and group membership; overall `Ready=False/AgentGrantSyncPending` still blocks agents, chat and policies. With the flag disabled, existing tenant readiness semantics remain unchanged. Do not enable the flag yet; authoritative Authentik membership and Fabric/AgentIdentity tuple synchronization, deletion/revocation policy, runtime BFF checks and live two-tenant acceptance are still required.
+
+The binding ConfigMap and FGA service key are platform-private. The binding resolver is **not** a browser API and does not by itself prove permission to chat. Model freshness must still be checked by trusted Fabric authorization callers before any sensitive operation. This source-only slice is not a production promotion candidate.
+
+
+
+### Scoped OpenFGA tuple reconciliation primitive — staged #3996
+
+`internal/openfga/tuples.go` stages a **private, source-only** tuple reconciler for a single Fabric-owned `object + relation` at a time. It uses an immutable `storeID` and `modelID` supplied by trusted Fabric code, validates the approved model, lists the exact relation with bounded pagination, calculates the desired-minus-actual difference, revokes stale tuples **before** adding new tuples and verifies the exact resulting relation set and pinned model. OpenFGA's `on_duplicate=ignore` / `on_missing=ignore` options make retries tolerant of prior successful writes; no success is reported if a write or read-back fails.
+
+The primitive allows only a deliberately restricted `group` and `agent` relation vocabulary. It cannot select a whole store for deletion, take browser-supplied store/model IDs or infer permissions from an agent owner, IAM group name or workspace scope. Each call represents an **authoritatively complete snapshot for that one relation**; it MUST NOT be passed a partial Authentik response as an empty membership set. Tenant ownership and serialized ownership of writes are responsibilities of the forthcoming Fabric controller integration.
+
+**Not connected to `TenantBundleReconciler` yet:** this stage does not query Authentik, map OIDC subjects, materialize `AgentIdentity` grants, or activate any tuple writes in the cluster. Before connecting it, the controller must resolve immutable Fabric IDs from verified IAM subjects, distinguish authored grants from membership, detect partial/stale snapshots, set revocation/readiness conditions, handle deletion and concurrent generations, and validate real OpenFGA `Check` against representative tenant A/B identities. The existing feature gate remains off and production promotion remains prohibited without explicit owner approval.
+
+
+### Authentik human-membership snapshot client — staged #3996
+
+`internal/authentik/memberships.go` introduces a **read-only, operator-owned** Authentik 2026.8 API client pinned to the internal Service `authentik.auth.svc:9000`. It resolves the exact generated tenant IAM group (`txo-fabric-<tenant>-<group>`) by unique immutable Authentik group UUID, then enumerates members through `core/users/?groups_by_pk=...`. It verifies every page's count/cursor, checks that each user truly belongs to the selected UUID, excludes disabled users, rejects malformed or duplicate identity records, and repeats the complete snapshot before returning an apparently stable set. API credentials are never accepted from the browser, tenant payload or workspace declarations.
+
+**This is not yet a grant source connected to OpenFGA.** The returned UUIDs are Authentik identities, *not* the canonical Fabric user IDs expected in `user:...` tuples. A trusted Authentik subject → Fabric stable user mapping, explicit agent permissions and ownership verification, runtime-only credential from OpenBao/External Secrets, dedicated operator ↔ Authentik NetworkPolicies, retries and freshness ceilings must be implemented before its results may flow to `ReconcileTupleScope`. Double reading detects common changes across pages but is **not an atomic IAM transaction** and must not be treated as one. During an IAM outage, the operator must report authorization not ready, never treat missing/partial data as an authorized empty user list, and the BFF must deny checks until revalidation.
+
+The existing human workspace `access.userRef` and group paths/PVCs are deliberately unchanged. #3852 requires a separate identity/migration design decision before altering those durable resource names. There is no production IAM token, external secret or open network rule added by this source-only stage. The OpenFGA gate stays off and no production promotion is authorized.
+
+### Tenant-scoped canonical Authentik / OIDC / Fabric identity projection — staged #3996
+
+`internal/authentik/identity_registry.go` introduces a source-only, strictly tenant-scoped identity projection from **explicit, complete Fabric-owned bindings**: `(tenantID, trusted issuer, exact OIDC sub, Authentik user UUID, immutable fabricUserId)`. It never assumes that `sub == user UUID`, derives an identifier from a mutable login, or equates `workspace.users[].name` / `access.userRef` with an authorization subject. Repeated/ambiguous subject, UUID or Fabric ID bindings are rejected. The group translator accepts only `TenantBundle`-approved IAM group keys and fails closed on every unmapped or duplicated Authentik UUID instead of generating partial desired grants.
+
+**Important upstream contract:** generated tenant Authentik OAuth2 providers currently omit `sub_mode`; the Authentik provider model defaults to `hashed_user_id`, which is **not** the `core/users` UUID. The server-side verification layer must map the *actually issued* opaque `sub` to the Authentik UUID and Fabric user ID via an approved persisted binding. Silently switching existing providers to `sub_mode: user_uuid` would be an identity migration affecting sessions and is **not performed here**. This source-only registry does not verify OIDC signatures, allocate IDs, create or mutate durable identity bindings, read an IAM API or write OpenFGA tuples.
+
+**Not yet connected to TenantBundle or the web BFF.** The next implementation must define/prove the durable Fabric-owned binding lifecycle without per-tenant manual bootstrap, issuer/audience/server-session verification, Authentik group UUID continuity, freshness ceilings and revocation. Only a complete and verified IAM snapshot may feed the existing scoped tuple reconciler. This change adds no manifests, credentials, network access, PVC changes, user/workspace renames, grant defaults or production activation. `TXO_FABRIC_OPENFGA_STORES_ENABLED` stays disabled.
+
+### Durable Authentik group UUID pins — operator-owned, gated #3996 slice
+
+`internal/controller/tenantbundle_openfga_iam_group_pins.go` adds an **operator-owned, resourceVersion-checked IAM group UUID registry** on each tenant's retained private OpenFGA store/model ConfigMap. It records a versioned, canonical list of `{name, authentikGroupUUID}` for exactly the `TenantBundle.spec.humanAccess.web.iamGroups` groups. The operator initializes the pins automatically via the **read-only, double-read Authentik group membership API** after the blueprint and approved OpenFGA store/model + empty identity ledger have been reconciled. A valid empty-membership snapshot can pin an empty group; no human user or grant is created by this step.
+
+Each subsequent guarded reconcile checks the actual **immutable Authentik group UUID**, not just the group name. Newly declared groups can be appended after verifying all groups first, but a recreated group, missing/incomplete API response, duplicate UUID, tampered JSON/schema, stale `TenantBundle` UID, model mismatch or previous pinned group removed from the declaration blocks reconciliation **without rewriting the pins**. Group removal/rename MUST wait for an explicit, verified `group#member` tuple revocation lifecycle before retiring a pin; otherwise old grants could survive invisibly. The current implementation deliberately fails closed on group shrink rather than silently garbage-collecting it.
+
+This guarded branch resolves an operator-owned Authentik token only from the platform-private `txo-fabric-system/txo-authentik-runtime` Secret key `token`; a controller test seam can inject the read-only client. **A platform-only OpenBao ExternalSecret reference and TLS-pinned operator→Traefik NetworkPolicy are staged by #3996; no token is committed, provisioned or validated live.** Without an enrolled token, the guarded reconciliation reports `OpenFGAAuthorizationReady=False/IAMCredentialMissing`. The production OpenFGA feature flag remains OFF, so current hAIrem and Indiba readiness is unchanged. No browser-supplied credentials, group UUIDs or arbitrary FGA stores are accepted.
+
+This does NOT automatically enroll hashed OIDC subjects or synchronize member tuples in the main loop. A staged `reconcileIAMGroupMembersFromPersistedPins` wrapper already loads these Fabric-retained pins before invoking the #4019 group tuple projection, so the activation path never accepts caller-supplied UUID maps; **the wrapper is called only behind the disabled-by-default OpenFGA gate**, after verifying retained pins and current active accounts, and is followed by exact `tenant#member` reconciliation. Enrollment, agent grants, BFF and physical A/B/C `Check` tests remain blockers for production enablement.
+
+### Verified Authentik group membership → scoped OpenFGA tuple convergence (staged #3996)
+
+`internal/controller/tenantbundle_openfga_iam_projection.go` connects the existing *trusted source-only* components without activating them: a double-read Authentik `SnapshotGroupMembership` reader, the retained tenant-scoped `IdentityRegistry`, and the already implemented `openfga.Client.ReconcileTupleScope`. The new operator method accepts only `TenantBundle`-declared group keys and **previously pinned immutable Authentik group-name → group-UUID associations** from a future Fabric-owned durable source (not an OIDC group claim). It chooses the store and model itself from retained, UID-bound Fabric state and verifies them through the existing ledger/model reader. Unmapped users, incomplete or inconsistent membership snapshots, changed group UUIDs, and foreign tenants fail before **any** FGA write. All group snapshots must be validated first; the only desired relations are `group:txo-fabric-<tenant>-<key>#member@user:<fabricUserId>`.
+
+Once an authorized owner invokes the method, its underlying scoped writer **removes obsolete membership tuples before adding new ones**, reads back the exact resulting set and revalidates the model; the controller rechecks the Authentik snapshots and retained binding afterward. Unit tests exercise grant, membership removal, empty-group revocation, tenant A/B store separation, absent or changed group pin, unmapped/disabled-incompatible data, source outages and mid-sync membership changes. This establishes the **source-to-tuple reconciliation method**, *not* an operational membership synchronizer: even repeated snapshots are not transactional, and a source race/outage **must** leave the caller/serving BFF in a denied/stale state until the next successful fresh convergence.
+
+**Deliberate gate:** This helper is **not called by the main TenantBundle loop**. Its trusted group-UUID pin registry, verified OIDC subject → Authentik UUID enrollment writer, operator Authentik service token from OpenBao, scoped NetworkPolicy, refresh/lease/freshness enforcement, AgentIdentity grants, BFF deny-on-stale, and physical A/B/C Check+revocation acceptance still require separate implementation and evidence. In particular, **never pass group UUIDs from the browser or auto-pin a recreated group from its name**. `TXO_FABRIC_OPENFGA_STORES_ENABLED` remains off and `OpenFGAAuthorizationReady` remains False. No new prod permission or rollout is implied by this PR.
+
+### Retained per-tenant canonical human identity ledger — guarded #3996 slice
+
+`internal/controller/tenantbundle_openfga_identities.go` now hooks into the **existing disabled-by-default OpenFGA store/model gate**, *after* the operator has durably verified its tenant store and model. For each `TenantBundle` with `humanAccess.web`, the operator initializes an **empty** and versioned `identityBindings: "[]"` ledger plus an issuer pin on the already retained, platform-private `txo-fabric-system/txo-openfga-tenant-<tenantId>` ConfigMap. The same protected binding persists `tenantID`, original `tenantUID`, `storeID`, `modelID` and model fingerprint: **no new tenant provisioning entry point or workspace/PVC migration** is introduced. No per-client manual store/identity-ledger bootstrap is needed once the gate is deliberately enabled in a reviewed later rollout.
+
+The ledger is read with strict JSON field and trailing-data validation, issuer and tenant-UID binding, duplicate user/subject/UUID detection via `internal/authentik/identity_registry.go`, and a fresh OpenFGA model binding verification; malformed, partially removed or cross-tenant records fail closed. A version marker makes losing either issuer or records detectable. Reconciliation **does not replace or mutate existing human mappings**, authorize on ledger presence or silently switch issuer; a verified issuer migration and human offboarding need explicit lifecycle work. A future trusted Fabric API must validate the OIDC identity and its actual Authentik account UUID before writing via a resourceVersion/CAS-guarded enrollment path. It must not reconstruct OIDC `sub` from Authentik's username or assume `sub == UUID`.
+
+**This is not a complete grant implementation.** The ledger contains **zero enrolled humans at creation**, does not discover users from `workspace.users`, Authentik groups or claims, and never calls the tuple writer. Membership sync, issuer-sub enrollment, group UUID continuity, periodic refresh, revocation/physical `Check`, BFF resolver and platform-control store provisioning are still required. `OpenFGAAuthorizationReady` remains **False / TupleSyncNotImplemented** even when the ledger is valid. The production `TXO_FABRIC_OPENFGA_STORES_ENABLED` flag is untouched/off. No deployment, secret, NetworkPolicy or production promotion change belongs to this PR.
+
+## Development
+
+The production cluster is Kubernetes 1.34, so this module pins controller-runtime
+0.22.x / k8s.io 0.34.x. Generate API/RBAC assets with controller-tools 0.19.x.
+
+```sh
+make generate manifests
+make test
+```
+
+The operator image is built to GHCR after merge; a separate GitOps change enables
+the manager only after an immutable image tag exists. This prevents a source PR
+from deploying a non-existent image into `txo-fabric-system`.
+
+### Authentik signed immutable user UUID scope (staged #3996)
+
+The generated tenant OIDC blueprint includes exactly one reusable Authentik
+OAuth2 scope mapping `txo_fabric_identity`. Its server-side Authentik
+expression returns `txo_fabric_user_uuid` from `request.user.uuid`;
+each tenant's OAuth provider references the mapping with
+`include_claims_in_id_token: true`. The scope is **not** an authorization
+relation or a Fabric user ID and does not manage user/group membership.
+
+The future Fabric BFF verifies signed global and tenant OIDC proofs
+(issuer, audience, nonce, signature, expiry and the immutable UUID equality)
+and sends only its authenticated six-field assertion to Fabric: tenant key,
+tenant issuer, tenant subject, UUID, global issuer and global subject. No
+username, email, UUID or opaque subject is declared in `TenantBundle` Git.
+Fabric accepts the assertion only for the exact tenant issuer and a fresh,
+active Authentik account that is a member of the tenant-declared, UID-bound and
+UUID-pinned IAM group set. The global proof is transport-only; the ledger
+persists only the tenant issuer and tenant subject. Existing Authentik
+`sub_mode` is **not changed** (it may be `hashed_user_id`); no implicit
+migration or username lookup is permitted. The existing agent dashboard OIDC
+scope settings are left untouched because they are **not** the future
+authenticated Fabric BFF.
+
+This source change alone does not deploy an OIDC BFF, persist human identities,
+create grants or turn on the OpenFGA rollout flag. Verify the real Authentik
+blueprint application and signed claim in a controlled runtime recipe before
+considering enrollment safe; no production promotion is implied.
+
+### Private verified-human enrollment and immutable account/group preflight (staged #3996)
+
+The source-only operator exposes a **private bridge-only** enrollment primitive.
+`EnrollPrivateBFFIdentity` accepts exactly the authenticated bridge assertion:
+tenant key, tenant issuer, tenant subject, immutable Authentik UUID, global
+issuer and global subject. The bridge is responsible for validating both signed
+OIDC proofs, their issuer/audience/nonce/expiry, the one-shot transaction and
+UUID equality before invoking this primitive. `TenantBundle` declares none of
+the human identity values: no username, email, UUID or opaque OIDC subject.
+
+Fabric reloads the canonical tenant and accepts the assertion only when the
+tenant issuer is exact, the immutable account is active, and that UUID is a
+current member of at least one tenant-declared IAM group. The group name is
+derived from the tenant declaration and must match its retained tenant-UID-bound
+immutable Authentik group UUID pin. Account and complete group snapshots are
+rechecked after the CAS write (and on idempotent replay); source unavailability,
+a group replacement, a membership change or account deactivation fail closed.
+The ledger is still validated against its retained tenant UID, OpenFGA store and
+model before allocating a random `usr...` identity or returning the existing
+stable Fabric user ID. UUID/sub rebinding, foreign tenant/issuer, deleted
+tenants, altered models/ledgers and Kubernetes CAS conflicts are refused.
+
+This is neither public ingress nor an authorization grant. Browser login,
+TokenReview/HMAC bridge authentication, PKCE/state/nonce replay protection and
+signed OIDC verification remain bridge responsibilities. A successful ledger
+write does not authorize chat, agent access, tenant administration or OpenFGA
+membership: the normal freshness, membership projection and Check gates remain
+separate. `TXO_FABRIC_OPENFGA_STORES_ENABLED` remains disabled in GitOps; no
+production promotion, live account mutation or authorization smoke is implied.
+
+A raw Go `trustedHumanOIDCProof` is a privileged internal transport value, not
+cryptographic evidence. No browser, tenant pod, REST request or `TenantBundle`
+field may create one. This source-only contract exists for the private bridge;
+its physical activation still requires a separately reviewed candidate and
+runtime proof.
+
+## Source-only guarded Authentik → OpenFGA membership readiness (#3996, Prompt 03)
+
+**NO production rollout is enabled by this PR.** `TXO_FABRIC_OPENFGA_STORES_ENABLED`
+remains absent/off in the pinned operator Deployment. Existing tenants still see
+`OpenFGAAuthorizationReady=False/RolloutDisabled` without OpenFGA authorization writes.
+
+When deliberately enabled **only for a controlled non-production proof**, the
+TenantBundle reconciler reads approved tenant UID/store/model/identity ledger,
+immutable pinned Authentik group UUIDs and complete, double-read Authentik
+active group memberships. The operator independently rechecks every active
+account by immutable Authentik UUID (never username, email, OIDC `sub`, claims
+or browser group). An unmapped active account is **not silently skipped** and
+therefore blocks readiness until an existing reviewed identity ledger binding
+exists; this code does not enroll humans. An explicitly empty complete group
+roster reconciles an empty grant set, not a missing snapshot.
+
+Existing `group:<tenant-group>#member` scopes are reconciled and read back,
+then their deduplicated union becomes the distinct direct
+`tenant:<immutable TEN...>#member` scope in **that tenant's private store**.
+Both scopes are reconciled by the OpenFGA client using pinned model ID and
+exact authoritative read-back; removed memberships are deleted. This is NOT
+`agent.can_chat`, `tenant.admin`, platform admin or effective-policy access.
+An interrupted write cannot claim convergence; retry starts from full source
+inventory and deletes revoked members before adding new ones.
+
+### Platform Authentik API reader bootstrap (prerequisite, NEVER in Git)
+
+- ExternalSecret: `txo-fabric-system/txo-fabric-authentik-iam-reader`
+  (ClusterSecretStore `openbao`).
+- OpenBao KV record: `vixens/prod/apps/60-services/txo-fabric/authentik-iam-reader`;
+  required field **`token`**. Output Kubernetes Secret:
+  `txo-fabric-system/txo-authentik-runtime`, key `token`. Do not paste
+  or log the value.
+- Enroll an **independent Authentik service account**, not a browser user or
+  Core administrator token, with a short-lifetime revocable API token.
+  Grant only API permissions needed for `GET /api/v3/core/groups/` and
+  `GET /api/v3/core/users/` filtered by exact group UUID or user UUID
+  (in supported Authentik versions these are group/user *view* permissions;
+  validate required global/object scope against the deployed instance).
+  NO token minting, group editing, membership writing, OIDC provider editing,
+  or administrator/superuser privilege. A denied list/read must cause
+  `OpenFGAAuthorizationReady=False`; **do not increase privileges to conceal
+  an invalid API permission assumption**. Verify with a scoped, read-only
+  API call before activation, never display token or full identity inventory.
+- Rotate by creating a new least-privilege API token, changing the OpenBao
+  field, waiting for ESO `Ready=True`, testing renewed read-only queries,
+  then revoking the old token in Authentik. Deletion, expiry, revoked token,
+  unreadable ESO/Secret or user disablement must fail closed on the next
+  reconcile, or by the short status lease if the controller is unavailable.
+  Infrastructure OpenBao is a **platform bootstrap mechanism only**, not a
+  customer/tenant vault.
+- Authentik currently serves internal HTTP on `auth/authentik:9000`, and
+  the existing public Authentik hostname has TLS on Traefik websecure 443.
+  The operator client pins `https://authentik.truxonline.com` for Host,
+  SNI and CA verification but dials the **existing in-cluster Traefik
+  Service** TCP 443, without proxy, redirect or HTTP fallback. GitOps
+  egress only permits Traefik pod TCP 443 plus existing DNS/OpenFGA paths;
+  Authentik already admits ingress from Traefik. TLS terminates at
+  Traefik, which retains the existing in-cluster HTTP hop to Authentik.
+  This boundary is not end-to-end TLS; review that risk and validate
+  certificate, routing and Cilium/NetworkPolicy in a controlled environment.
+
+### Explicit inactive-account revocation (Electra review #4039 / Prompt 03a)
+
+A verified `Active=false` returned by the read-only Authentik account
+adapter is authoritative revocation evidence, not merely a reason to refuse
+a new readiness lease. After verifying the **entire** pinned group membership
+snapshot and all accounts twice, an explicitly inactive UUID is resolved
+only through the existing tenant's immutable Authentik UUID → Fabric user ID
+ledger binding. The operator removes **that one direct `user:<FabricID>`
+`member` tuple** from each server-owned pinned `group#member` scope and
+the tenant's `tenant#member` scope, in the immutable tenant store/model.
+
+This operation is deliberately **not** a replace-the-group API: it never
+drops an unrelated user, group, agent grant or another tenant's store tuples.
+OpenFGA must confirm both the deletion (when present) and the following
+complete, exact read-back (including model ID verification). Already-absent
+members require no write, so repeats are idempotent. On success readiness
+is still `False/AccountInactive`, with **no** `validUntil`; on FGA
+write/read-back failure it remains `False/TupleMismatch`. A partially
+completed two-scope revocation is retried idempotently; it is never reported
+ready.
+
+A missing/expired token, ambiguous UUID, changed group pin, invalid
+account response, IAM outage, stale group snapshot or incomplete inventory
+**never triggers speculative deletion**. Neither this path nor the normal
+membership sync alters retained ledger issuer, subject, Fabric user IDs or
+grants outside member scopes. Feature gate remains OFF by default.
+
+### Readiness and freshness contract
+
+The gate-off state has the stable `RolloutDisabled` reason and performs no
+tuple writes. When enabled, failure reasons include
+`IAMCredentialMissing`, `IAMCredentialInvalid`, `IAMSourceUnavailable`,
+`AccountInactive`, `GroupPinInvalid`, `IdentityLedgerInvalid`,
+`OpenFGAUnavailable`, `TupleMismatch` and `StaleSnapshot`. Messages
+are generic and contain no token, issuer subject, group list, membership
+roster or FGA store/model ID. Every failed read/write/read-back clears
+`OpenFGAAuthorizationReady=True` immediately when observed.
+
+The entire source-to-read-back operation must finish within **30 seconds**;
+otherwise it reports `StaleSnapshot`. Success sets condition
+`OpenFGAAuthorizationReady=True/TenantMembershipReconciled` with a non-secret
+`validUntil=<RFC3339Nano UTC>` lease **60 seconds** after verification;
+reconciliation is scheduled every **20 seconds**. Clients (including future
+#4037) MUST reject a True condition without matching observedGeneration,
+complete known reason, a parsable `validUntil` and a lease that has not
+expired; never treat an old True as indefinitely fresh after controller
+outage. This is a bounded **operator observation**, not instantaneous
+revocation: future BFF checks MUST independently recheck live Authentik and
+OpenFGA at the time of sensitive action. It is unsafe to infer chat access
+from the membership readiness condition.
+
+Overall `TenantBundle.Ready` stays False/`AgentGrantSyncPending` even
+after membership convergence: AgentIdentity grants, agent/tenant lifecycle,
+effective policies and physical A/B/C revocation remain separate #3996 /
+#3981 / #4037 gates.
+
+### Post-merge non-production inspection (read-only)
+
+```bash
+kubectl -n txo-fabric-system get externalsecret txo-fabric-authentik-iam-reader
+kubectl -n txo-fabric-system get secret txo-authentik-runtime -o name
+kubectl -n txo-fabric-system get networkpolicy txo-fabric-operator-egress -o yaml
+kubectl get tenantbundle -o custom-columns='NAME:.metadata.name,AUTH:.status.conditions[?(@.type=="OpenFGAAuthorizationReady")].reason'
+kubectl -n argocd get applications
+```
+
+Do not display Secret data, force Argo sync, activate the flag, run manual
+FGA writes or promote `dev-v*` from this PR. Verify rendered overlay first,
+then intentionally staged non-prod authorization/expiry and revoked-group
+read-back in the normal GitOps lifecycle before proposing any production
+change. **Rollback:** revert new code/ESO/NP in GitOps and/or disable
+`TXO_FABRIC_OPENFGA_STORES_ENABLED` (already off); never delete retained
+tenant ConfigMaps, user identity ledgers, OpenFGA stores or grants as a
+rollback shortcut.
+
+## #4037 — private global BFF identity bridge (source-only, **OFF**)
+
+This contract does not expose or run the global WebUI. The global Authentik
+OIDC issuer (`/application/o/txo-fabric-webui/`) is NOT the historical
+per-tenant issuer. No subject migration/enrollment is performed.
+
+**Endpoint:** `POST /internal/v1/identity/resolve` on a separate private
+port 8090 (not metrics 8080 or health 8081). The Service
+`txo-fabric-operator-private-bff.txo-fabric-system.svc:8090` is
+**ClusterIP only** and has no Ingress, LoadBalancer, NodePort, or public
+HTTP route. The ingress NetworkPolicy allows only BFF-labelled pods in
+`txo-fabric-system` to port 8090; existing metrics/probes remain available
+as before. Network labels are NOT sufficient authentication.
+
+**Request** (JSON, no optional client authority):
+```json
+{"tenantKey":"indiba","authentikUserUUID":"550e8400-e29b-41d4-a716-446655440001"}
+```
+**Success:** `{"tenantKey":"indiba","fabricUserId":"usr..."}`.
+All denial branches (missing tenant, unregistered UUID, FGA/IAM unavailable,
+stale lease, invalid TokenReview, malformed proof, already-used nonce)
+return the same generic `403 identity unavailable`, `Cache-Control: no-store`;
+never include issuer, legacy subject, group, OpenFGA store or model in the
+response. This endpoint does **not** grant chat/agent access.
+
+**Required two independent workload proofs:**
+
+1. `Authorization: Bearer <projected-BFF-Kubernetes-ServiceAccount-token>`.
+   Kubernetes **TokenReview** MUST authenticate
+   `system:serviceaccount:txo-fabric-system:txo-fabric-webui-bff` with
+   **exact** audience `txo-fabric-private-identity`. Following a positive
+   review, the bound JWT's `iss`, `sub` and sole `aud` must match the
+   configured cluster issuer, expected ServiceAccount and audience. It must
+   carry a valid `iat`/`exp` within **one hour** (and satisfy optional
+   `nbf`); request a dedicated short-lived projected SA token, never use a
+   legacy extension token with unbounded effective validity. A
+   browser OIDC token, arbitrary username header or another SA cannot
+   pass. K8s RBAC grants only the operator the TokenReview create action.
+2. `X-Fabric-Assertion: base64url(UTF8 JSON).base64url(HMAC-SHA256(...))`
+   signed with a separate platform HMAC key of **at least 32 bytes**.
+   JSON fields must be exactly `method`, `path`, `tenantKey`,
+   `authentikUserUUID`, `serviceAccount`, `audience`, `iat`,
+   `exp`, `jti`. Signature covers the base64url payload bytes and
+   the server checks each claim against the actual method/endpoint,
+   request body and configured trusted authority. Validity maximum
+   **30 seconds**, forward skew max **5 seconds**. `jti` must be a
+   non-guessable CSPRNG-generated unique base64url value (>= 128 bits).
+   No signature/TokenReview/UUID appears in app logs or Kubernetes Lease.
+
+On a valid proof, the operator computes a SHA-256 opaque key from configured
+K8s issuer + audience + SA + tenantKey + jti, and atomically **Creates**
+a Kubernetes `coordination.k8s.io/Lease` in `txo-fabric-system` via the
+API server. Name `bff-jti-<48 lowercase hex chars>` contains no raw UUID,
+human subject or token. An already-existing key (including one with an old
+timestamp) or API outage **always denies**. There is NO local-memory nonce
+fallback and no successful response without an acknowledged CAS create.
+Callers must use a fresh assertion on every attempt; even denied requests
+may consume it. Nonces are durable across BFF/operator replica restarts.
+No request-time lease cleanup: **never** delete an in-use/recent nonce.
+Retention/periodic GC policy needs explicit later review; until then records
+remain (storage growth operational risk).
+
+**Tenant resolution:** the requested `tenantKey` identifies a
+cluster-scoped, active `TenantBundle` owned by Fabric. It never conveys
+permission. The resolver requires matching `observedGeneration`,
+`OpenFGAAuthorizationReady=True` with reason
+`TenantMembershipReconciled` and a properly bounded unexpired
+`validUntil` lease. All lookups read the existing immutable
+tenant UID-bound, per-tenant issuer/subject/UUID/FabricUserID ledger,
+and validate retained store/model against the private OpenFGA API.
+Only exact `AuthentikUserUUID` resolves the Fabric ID. It re-reads the
+live Authentik account (must be active), every pinned group UUID/membership
+and the ledger/readiness before returning. The same Authentik UUID can map to
+different existing Fabric users **in different tenants**. No new identity,
+rebind, user directory, grant, tuple or issuer is minted.
+
+**Activation deliberately disabled:** the manager listens on 8090 **only**
+if `TXO_FABRIC_PRIVATE_BRIDGE_ENABLED=true`. GitOps pins it to
+`"false"` and pins `TXO_FABRIC_PRIVATE_BRIDGE_K8S_ISSUER=""`.
+The optional secretKeyRef `txo-fabric-private-bridge-assertion/hmac-key`
+is a reserved platform-secret contract, NOT created here. A future, separately
+reviewed BFF deployment must provision the exact SA, a projected token with
+the dedicated audience, the matching signing key via platform-approved
+secret distribution (never Git), and verify the actual cluster TokenReview
+issuer and private service/NetworkPolicy connectivity in nonprod before
+activating. No mTLS infrastructure is currently assumed; if introduced,
+enforce the authenticated BFF workload certificate in addition to
+TokenReview and one-time assertion, never instead of them. The current
+`TXO_FABRIC_OPENFGA_STORES_ENABLED` remains OFF. Do not advertise
+this as a functioning public login or a permission to call Hermes.
+
+**Validation/rollback:** Go unit/race tests cover forged workload JWT
+issuer/audience/SA, requests/assertions/signatures, replay with concurrency,
+CAS persistence failure, zero identity disclosures and cross-tenant UUID
+mapping, plus stale IAM and FGA readiness. A production-overlay render and
+real TokenReview/Auth/FGA connectivity remain separate. Rollback requires
+a GitOps revert, or leave both gates OFF; do not modify cluster resources
+directly or delete retained tenant identity ledgers.

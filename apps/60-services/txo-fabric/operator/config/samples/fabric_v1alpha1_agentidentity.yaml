@@ -1,0 +1,12 @@
+---
+apiVersion: fabric.truxonline.io/v1alpha1
+kind: AgentIdentity
+metadata:
+  name: hairem-sandbox-tina
+spec:
+  tenantRef:
+    name: hairem-sandbox
+  agentKey: tina
+  displayName: Tina
+  runtime:
+    profileRef: hermes-default

@@ -1,0 +1,354 @@
+package v1alpha1
+
+import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+type ObjectReference struct {
+	// Name is the metadata.name of the referenced cluster-scoped Fabric object.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	Name string `json:"name"`
+}
+
+type TenantLifecycleSpec struct {
+	// Mode controls the lifecycle of the mandatory tenant AI plane.
+	// Active is the default and receives the canonical tenant AI plane.
+	// Parked preserves the recovery shell and durable AI-plane state without
+	// running tenant LiteLLM/CPA compute. Optional capabilities keep their own
+	// declaration/lifecycle contracts.
+	// +optional
+	// +kubebuilder:default=Active
+	// +kubebuilder:validation:Enum=Active;Parked
+	Mode string `json:"mode,omitempty"`
+}
+
+type TenantIsolationSpec struct {
+	// Profile selects the isolation policy for the tenant cell.
+	// +kubebuilder:validation:Enum=Shared;Dedicated
+	// +kubebuilder:default=Shared
+	Profile string `json:"profile,omitempty"`
+}
+
+type PostgreSQLSpec struct {
+	// Mode selects logical resources on the platform shared cluster or a tenant-dedicated cluster.
+	// +kubebuilder:validation:Enum=Shared;Dedicated
+	// +kubebuilder:default=Shared
+	Mode string `json:"mode,omitempty"`
+
+	// ProfileRef selects a platform-owned database profile. The profile implementation is intentionally
+	// outside TenantBundle so tenants do not embed infrastructure credentials or topology.
+	// +optional
+	// +kubebuilder:validation:MaxLength=128
+	ProfileRef string `json:"profileRef,omitempty"`
+}
+
+type TenantPersistenceSpec struct {
+	// PostgreSQL requests PostgreSQL capability for this tenant. Nil means no PostgreSQL dependency.
+	// +optional
+	PostgreSQL *PostgreSQLSpec `json:"postgresql,omitempty"`
+}
+
+type HindsightMemorySpec struct {
+	// ProfileRef selects the Hindsight service profile owned by TXO Fabric.
+	// +optional
+	// +kubebuilder:validation:MaxLength=128
+	ProfileRef string `json:"profileRef,omitempty"`
+
+	// HumanAccess opts this tenant into the authenticated Hindsight Control Plane
+	// WebUI using TenantBundle.spec.humanAccess.web for DNS/TLS/ingress policy.
+	// +optional
+	// +kubebuilder:default=false
+	HumanAccess bool `json:"humanAccess,omitempty"`
+}
+
+type TenantMemorySpec struct {
+	// Hindsight enables tenant-scoped durable agent memory through Hindsight.
+	// +optional
+	Hindsight *HindsightMemorySpec `json:"hindsight,omitempty"`
+}
+
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.migrationRecovery) || (has(self.migrationRecovery) && self.migrationRecovery == oldSelf.migrationRecovery) || (!has(self.migrationRecovery) && !has(self.migrationRecoveryFailedGeneration) && !has(self.migrationRecoveryTransitions) && (!has(self.migrationRetry) || self.migrationRetry == 0))",message="migrationRecovery is immutable except for full retirement with migrationRetry zero"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.migrationRecoveryFailedGeneration) || (has(self.migrationRecoveryFailedGeneration) && self.migrationRecoveryFailedGeneration == oldSelf.migrationRecoveryFailedGeneration) || (!has(self.migrationRecovery) && !has(self.migrationRecoveryFailedGeneration) && !has(self.migrationRecoveryTransitions) && (!has(self.migrationRetry) || self.migrationRetry == 0))",message="migrationRecoveryFailedGeneration is immutable except for full retirement"
+// +kubebuilder:validation:XValidation:rule="has(self.migrationRecovery) == has(self.migrationRecoveryFailedGeneration)",message="migrationRecovery and migrationRecoveryFailedGeneration must be declared together"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.migrationRecoveryTransitions) || (has(self.migrationRecoveryTransitions) && self.migrationRecoveryTransitions.size() >= oldSelf.migrationRecoveryTransitions.size() && oldSelf.migrationRecoveryTransitions.all(old, self.migrationRecoveryTransitions.exists(current, current == old))) || (!has(self.migrationRecovery) && !has(self.migrationRecoveryFailedGeneration) && !has(self.migrationRecoveryTransitions) && (!has(self.migrationRetry) || self.migrationRetry == 0))",message="migrationRecoveryTransitions is append-only except for full retirement"
+// All three incident-only recovery inputs may be retired together with
+// migrationRetry=0 after the controller verifies retained terminal status and
+// exact consumed recovery markers. CEL cannot read status: unsafe early
+// retirement remains explicitly fail-closed in the reconciler.
+type TenantAIGatewaySpec struct {
+	// ProfileRef selects the tenant-facing LiteLLM gateway profile.
+	// +optional
+	// +kubebuilder:default=litellm-standard
+	// +kubebuilder:validation:MaxLength=128
+	ProfileRef string `json:"profileRef,omitempty"`
+
+	// MigrationRetry is the reviewed migration attempt ordinal. Attempt zero is
+	// created for a new tenant. A later value is accepted only as the next
+	// ordinal after a retained failed attempt; profile or configuration changes
+	// never create another migration Job.
+	// +optional
+	// +kubebuilder:default=0
+	// +kubebuilder:validation:Minimum=0
+	MigrationRetry int32 `json:"migrationRetry,omitempty"`
+
+	// MigrationRecovery is a reviewed, immutable-until-retired recovery identifier for a
+	// legacy failed migration whose retained Job evidence was lost before the
+	// UID-bound status contract existed. It permits exactly attempt 1, never
+	// resets an existing attempt history, and is not a recurring operation.
+	// +optional
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`
+	MigrationRecovery string `json:"migrationRecovery,omitempty"`
+
+	// MigrationRecoveryFailedGeneration binds MigrationRecovery to the exact
+	// historical TenantBundle generation which recorded MigrationFailed. It is
+	// immutable, so later unrelated spec changes cannot replay the transition.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	MigrationRecoveryFailedGeneration int64 `json:"migrationRecoveryFailedGeneration,omitempty"`
+
+	// MigrationRecoveryTransitions are reviewed, immutable-until-retired recovery admissions
+	// for a specific retained EvidenceMissing migration record. Entries are
+	// append-only: each request names the tenant, exact prior attempt and UID,
+	// and one unique identifier; it cannot repair or replace historical status.
+	// +optional
+	// +kubebuilder:validation:MaxItems=16
+	// +listType=map
+	// +listMapKey=id
+	MigrationRecoveryTransitions []AIGatewayMigrationRecoveryTransition `json:"migrationRecoveryTransitions,omitempty"`
+}
+
+// AIGatewayMigrationRecoveryTransition admits one successor to an exact
+// historical EvidenceMissing record. All values are declarative review inputs;
+// the controller validates them against the TenantBundle and records its own
+// owner/UID-bound consumption marker before creating the successor Job.
+type AIGatewayMigrationRecoveryTransition struct {
+	// ID is a unique immutable recovery identifier within this TenantBundle.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`
+	ID string `json:"id"`
+
+	// TenantID must equal the containing TenantBundle spec.tenantId.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	TenantID string `json:"tenantId"`
+
+	// ExpectedAttempt identifies the retained EvidenceMissing record.
+	// +kubebuilder:validation:Minimum=0
+	ExpectedAttempt int32 `json:"expectedAttempt"`
+
+	// ExpectedJobUID binds the request to the historical Job identity.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	ExpectedJobUID string `json:"expectedJobUID"`
+}
+
+// AIGatewayMigrationPhase is the evidence-derived phase of one retained
+// LiteLLM migration Job. A terminal phase is derived only from the JobComplete
+// or JobFailed Job conditions.
+// +kubebuilder:validation:Enum=Pending;Succeeded;Failed;EvidenceMissing
+type AIGatewayMigrationPhase string
+
+const (
+	AIGatewayMigrationPending         AIGatewayMigrationPhase = "Pending"
+	AIGatewayMigrationSucceeded       AIGatewayMigrationPhase = "Succeeded"
+	AIGatewayMigrationFailed          AIGatewayMigrationPhase = "Failed"
+	AIGatewayMigrationEvidenceMissing AIGatewayMigrationPhase = "EvidenceMissing"
+)
+
+// AIGatewayMigrationStatus is durable, UID-bound evidence for one migration
+// attempt. Records are appended for new attempts and never replaced by a
+// different Job identity.
+type AIGatewayMigrationStatus struct {
+	// Attempt is the monotonically increasing migration attempt ordinal.
+	Attempt int32 `json:"attempt"`
+
+	// JobName is the immutable name of the Job created for this attempt.
+	JobName string `json:"jobName"`
+
+	// JobUID binds the evidence to one Kubernetes Job instance.
+	JobUID string `json:"jobUID"`
+
+	// Phase is observed from the bound Job's terminal conditions only.
+	Phase AIGatewayMigrationPhase `json:"phase"`
+}
+
+// WorkspaceMigrationPhase is the durable evidence phase for one shared workspace copy.
+// +kubebuilder:validation:Enum=Pending;Succeeded;LegacyRecovered;Failed;EvidenceMissing;EvidenceConflict
+type WorkspaceMigrationPhase string
+
+const (
+	WorkspaceMigrationPending          WorkspaceMigrationPhase = "Pending"
+	WorkspaceMigrationSucceeded        WorkspaceMigrationPhase = "Succeeded"
+	WorkspaceMigrationLegacyRecovered  WorkspaceMigrationPhase = "LegacyRecovered"
+	WorkspaceMigrationFailed           WorkspaceMigrationPhase = "Failed"
+	WorkspaceMigrationEvidenceMissing  WorkspaceMigrationPhase = "EvidenceMissing"
+	WorkspaceMigrationEvidenceConflict WorkspaceMigrationPhase = "EvidenceConflict"
+)
+
+// WorkspaceMigrationAttestationStatus persists exact UID-bound copy evidence
+// after the short-lived Kubernetes Job has expired.
+// RuntimeStorageMigrationAttestationStatus persists exact runtime copy evidence after transient Jobs expire.
+type RuntimeStorageMigrationAttestationStatus struct {
+	SourceClaimName string `json:"sourceClaimName"`
+	SourcePVCUID    string `json:"sourcePVCUID"`
+	TargetClaimName string `json:"targetClaimName"`
+	TargetPVCUID    string `json:"targetPVCUID"`
+	CopyJobName     string `json:"copyJobName,omitempty"`
+	CopyJobUID      string `json:"copyJobUID,omitempty"`
+	// +kubebuilder:validation:Enum=Succeeded;LegacyRecovered;EvidenceConflict
+	Phase string `json:"phase"`
+	// +kubebuilder:validation:Enum=Job;LegacyTargetBinding
+	EvidenceSource     string `json:"evidenceSource"`
+	VerificationResult string `json:"verificationResult"`
+}
+
+type WorkspaceMigrationAttestationStatus struct {
+	SourceClaimName    string                  `json:"sourceClaimName"`
+	SourcePVCUID       string                  `json:"sourcePVCUID"`
+	TargetClaimName    string                  `json:"targetClaimName"`
+	TargetPVCUID       string                  `json:"targetPVCUID"`
+	JobName            string                  `json:"jobName,omitempty"`
+	JobUID             string                  `json:"jobUID,omitempty"`
+	EvidenceSource     string                  `json:"evidenceSource,omitempty"`
+	Phase              WorkspaceMigrationPhase `json:"phase"`
+	VerificationResult string                  `json:"verificationResult"`
+}
+
+type TenantAICredentialBrokerSpec struct {
+	// ProfileRef selects the tenant-local OAuth/subscription credential broker profile.
+	// +optional
+	// +kubebuilder:default=cliproxyapi-standard
+	// +kubebuilder:validation:MaxLength=128
+	ProfileRef string `json:"profileRef,omitempty"`
+}
+
+type TenantModuleSpec struct {
+	// Name is the stable Fabric module key (for example paperclip or valkey).
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`
+	Name string `json:"name"`
+
+	// Enabled defaults to true when the module entry is present.
+	// +kubebuilder:default=true
+	Enabled bool `json:"enabled,omitempty"`
+
+	// ProfileRef selects a platform-owned implementation profile for the module.
+	// +optional
+	// +kubebuilder:validation:MaxLength=128
+	ProfileRef string `json:"profileRef,omitempty"`
+}
+
+type ComponentStatus struct {
+	// Phase is a concise machine-readable lifecycle state.
+	// +optional
+	Phase string `json:"phase,omitempty"`
+
+	// Endpoint is the resolved in-cluster endpoint, when the component exposes one.
+	// +optional
+	Endpoint string `json:"endpoint,omitempty"`
+
+	// HumanEndpoint is the stable authenticated human-facing endpoint when the
+	// component exposes an operator/admin WebUI.
+	// +optional
+	HumanEndpoint string `json:"humanEndpoint,omitempty"`
+
+	// Message contains a human-readable explanation for non-ready states.
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
+type TenantPersistenceStatus struct {
+	// +optional
+	PostgreSQL *ComponentStatus `json:"postgresql,omitempty"`
+}
+
+type TenantMemoryStatus struct {
+	// +optional
+	Hindsight *ComponentStatus `json:"hindsight,omitempty"`
+}
+
+type TenantModuleStatus struct {
+	Name            string `json:"name"`
+	ComponentStatus `json:",inline"`
+}
+
+type IntegrationAuthorizationStatus struct {
+	// BindingName is the Fabric authorization object evaluated for this runtime.
+	BindingName string `json:"bindingName"`
+
+	// ConnectionName is the logical integration connection referenced by the binding.
+	ConnectionName string `json:"connectionName"`
+
+	// Phase is Effective, Revoked or Denied. It never carries credential material.
+	Phase string `json:"phase"`
+
+	// Reason is a stable non-secret diagnostic explaining the phase.
+	Reason string `json:"reason,omitempty"`
+
+	// Revision changes when binding, connection or credential metadata changes.
+	Revision string `json:"revision,omitempty"`
+
+	// Operations are the effective generic operations requested by the binding.
+	// +optional
+	Operations []string `json:"operations,omitempty"`
+
+	// Scopes are the effective connection-defined scope labels.
+	// +optional
+	Scopes []string `json:"scopes,omitempty"`
+}
+
+type RuntimeStatus struct {
+	// DeploymentName is the generated Hermes Deployment.
+	// +optional
+	DeploymentName string `json:"deploymentName,omitempty"`
+
+	// PVCName is the generated runtime workspace PVC.
+	// +optional
+	PVCName string `json:"pvcName,omitempty"`
+
+	// HumanEndpoint is the stable authenticated human-facing endpoint when the
+	// AgentIdentity is opted into tenant human access.
+	// +optional
+	HumanEndpoint string `json:"humanEndpoint,omitempty"`
+
+	// ToolsetPolicyRevision identifies the effective platform-owned Hermes toolset policy.
+	// +optional
+	ToolsetPolicyRevision string `json:"toolsetPolicyRevision,omitempty"`
+
+	// EnabledToolsets lists toolsets admitted by the effective platform policy.
+	// +optional
+	EnabledToolsets []string `json:"enabledToolsets,omitempty"`
+
+	// DeniedToolsets lists profile-declared toolsets denied by the effective platform policy.
+	// +optional
+	DeniedToolsets []string `json:"deniedToolsets,omitempty"`
+
+	// IntegrationPolicyRevision identifies the effective non-secret integration projection.
+	// +optional
+	IntegrationPolicyRevision string `json:"integrationPolicyRevision,omitempty"`
+
+	// Integrations exposes effective/revoked/denied Fabric authorization without secret values.
+	// +optional
+	Integrations []IntegrationAuthorizationStatus `json:"integrations,omitempty"`
+}
+
+type MemoryBindingStatus struct {
+	// BankID is the resolved logical memory-bank identity.
+	// +optional
+	BankID string `json:"bankId,omitempty"`
+
+	// Phase describes memory provisioning for this identity.
+	// +optional
+	Phase string `json:"phase,omitempty"`
+}
+
+func conditionSliceCopy(in []metav1.Condition) []metav1.Condition {
+	if in == nil {
+		return nil
+	}
+	out := make([]metav1.Condition, len(in))
+	copy(out, in)
+	return out
+}
