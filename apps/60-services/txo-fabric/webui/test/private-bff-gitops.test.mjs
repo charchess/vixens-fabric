@@ -1,0 +1,133 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+function read(path) {
+  return readFileSync(new URL("../" + path, import.meta.url), "utf8");
+}
+test("BFF image build includes the locked Fabric client artifact", () => {
+  const dockerfile = read("Dockerfile");
+  const rootPackage = JSON.parse(read("package.json"));
+  const clientPackage = JSON.parse(read("client/package.json"));
+  assert.match(dockerfile, /COPY package\.json package-lock\.json \.\//);
+  assert.match(dockerfile, /RUN npm ci --omit=dev/);
+  assert.match(dockerfile, /COPY client\/package\.json client\/package-lock\.json \.\/client\//);
+  assert.match(dockerfile, /RUN npm ci --prefix client/);
+  assert.match(dockerfile, /RUN npm run build --prefix client/);
+  assert.match(dockerfile, /COPY --from=build-client \/app\/client\/dist \/app\/client/);
+  assert.equal(rootPackage.dependencies?.pg, "8.13.1");
+  assert.ok(clientPackage.dependencies?.["@assistant-ui/react"]);
+  assert.match(read("package-lock.json"), /"lockfileVersion"/);
+  assert.match(read("client/package-lock.json"), /"lockfileVersion"/);
+});
+
+test("BFF, ingress and global OIDC use fabric.truxonline.com as the exact public origin", () => {
+  const runtime = read("server/private-bff-server.mjs");
+  const login = read("server/global-oidc-login.mjs");
+  const ingress = read("runtime/ingress.yaml");
+  const authentik = read("../../../03-security/authentik/base/configmap.yaml");
+  const vite = read("client/vite.config.ts");
+  for (const source of [runtime, ingress, authentik]) assert.match(source, /fabric\.truxonline\.com/);
+  assert.match(login, /expectedOrigin \+ "\/auth\/callback"/);
+  assert.doesNotMatch([runtime, ingress, authentik].join("\n"), /webui\.truxonline\.com/);
+  assert.match(vite, /manifest: "asset-manifest\.json"/);
+  assert.match(vite, /sourcemap: false/);
+});
+
+test("production overlay renders BFF private workload, never credential/bootstrap activation", () => {
+  const overlay = read("../overlays/prod/kustomization.yaml");
+  const root = read("kustomization.yaml");
+  const runtime = read("runtime/kustomization.yaml");
+  assert.match(overlay, /^  - \.\.\/\.\.\/webui$/m);
+  assert.doesNotMatch(overlay, /webui\/bootstrap/);
+  assert.match(root, /^  - runtime$/m);
+  assert.match(root, /db\/migrations\/001_oidc_login_transactions.sql/);
+  assert.match(root, /db\/migrations\/002_global_browser_sessions.sql/);
+  assert.match(runtime, /^  - ingress\.yaml$/m);
+  assert.match(runtime, /^  - cilium-networkpolicy\.yaml$/m);
+  assert.doesNotMatch(root, /^  - bootstrap$/m);
+});
+
+test("private BFF network, TLS ingress and gate contracts match operator #4037 exactly", () => {
+  const sa = read("runtime/serviceaccount.yaml");
+  const deployment = read("runtime/deployment.yaml");
+  const service = read("runtime/service.yaml");
+  const policy = read("runtime/networkpolicy.yaml");
+  const ingress = read("runtime/ingress.yaml");
+  const ciliumPolicy = read("runtime/cilium-networkpolicy.yaml");
+  const operator = read("../operator/config/network/private-bridge-ingress.yaml");
+  assert.match(sa, /name: txo-fabric-webui-bff/);
+  assert.match(sa, /automountServiceAccountToken: false/);
+  assert.match(deployment, /serviceAccountName: txo-fabric-webui-bff/);
+  assert.match(deployment, /automountServiceAccountToken: false/);
+  assert.match(deployment, /audience: txo-fabric-private-identity/);
+  assert.match(deployment, /expirationSeconds: 3600/);
+  assert.match(deployment, /name: TXO_WEBUI_BFF_BROWSER_ENABLED\s+value: "false"/);
+  assert.match(deployment, /name: TXO_FABRIC_PRIVATE_BRIDGE_ENABLED\s+value: "false"/);
+  assert.match(deployment, /runAsNonRoot: true/);
+  assert.match(deployment, /readOnlyRootFilesystem: true/);
+  assert.match(deployment, /allowPrivilegeEscalation: false/);
+  assert.match(deployment, /requests:\s+cpu: \S+\s+memory: \S+/);
+  assert.match(deployment, /limits:\s+cpu: \S+\s+memory: \S+/);
+  assert.match(deployment, /startupProbe:/);
+  assert.match(deployment, /livenessProbe:/);
+  assert.match(deployment, /readinessProbe:/);
+  assert.match(deployment, /path: \/healthz/);
+  assert.match(deployment, /path: \/readyz/);
+  assert.match(deployment, /secretName: txo-fabric-private-bridge-assertion/);
+  assert.match(deployment, /optional: true/);
+  assert.match(deployment, /image: ghcr\.io\/charchess\/txo-fabric-webui-bff:(?:src-[a-f0-9]{12}|sha256:[a-f0-9]{64})|image: ghcr\.io\/charchess\/txo-fabric-webui-bff@sha256:[a-f0-9]{64}/);
+  assert.match(service, /type: ClusterIP/);
+  assert.doesNotMatch(service, /Ingress|Gateway|HTTPRoute|LoadBalancer|NodePort/);
+  assert.match(policy, /kubernetes\.io\/metadata\.name: traefik/);
+  assert.match(policy, /app\.kubernetes\.io\/name: traefik/);
+  assert.match(policy, /port: 53/);
+  assert.match(policy, /port: 5432/);
+  assert.match(policy, /port: 8090/);
+  assert.doesNotMatch(policy, /port: 443|port: 8080|port: 4000|port: 8317|0\.0\.0\.0\/0/);
+  assert.match(ingress, /ingressClassName: traefik/);
+  assert.match(ingress, /host: fabric\.truxonline\.com/);
+  assert.match(ingress, /- fabric\.truxonline\.com/);
+  assert.doesNotMatch(ingress, /webui\.truxonline\.com/);
+  assert.match(ingress, /cert-manager\.io\/cluster-issuer: letsencrypt-prod/);
+  assert.match(ingress, /external-dns\.alpha\.kubernetes\.io\/public: "true"/);
+  assert.match(ingress, /external-dns\.alpha\.kubernetes\.io\/target: truxonline\.com/);
+  assert.match(ciliumPolicy, /matchName: authentik\.truxonline\.com/);
+  assert.match(ciliumPolicy, /port: "443"/);
+  assert.match(operator, /app\.kubernetes\.io\/name: txo-fabric-webui-bff/);
+  assert.match(operator, /app\.kubernetes\.io\/component: bff/);
+  assert.match(operator, /port: 8090/);
+});
+
+test("SQL bootstrap remains out of production and migration is suspended/idempotent", () => {
+  const boot = read("bootstrap/kustomization.yaml");
+  const db = read("bootstrap/database.yaml");
+  const creds = read("bootstrap/credentials.yaml");
+  const job = read("bootstrap/migrate-job.yaml");
+  const sql1 = read("db/migrations/001_oidc_login_transactions.sql");
+  const sql2 = read("db/migrations/002_global_browser_sessions.sql");
+  assert.match(boot, /database.yaml/);
+  assert.match(boot, /credentials.yaml/);
+  assert.match(boot, /migrate-job.yaml/);
+  assert.match(db, /kind: DatabaseRole/);
+  assert.equal(db.match(/kind: DatabaseRole/g)?.length, 2);
+  assert.match(db, /name: txo_fabric_webui_runtime/);
+  assert.match(db, /name: txo_fabric_webui_migrator/);
+  assert.match(db, /name: txo_fabric_webui\n  owner: txo_fabric_webui_migrator/);
+  assert.match(db, /superuser: false/g);
+  assert.doesNotMatch(db, /name: txo_fabric_openfga/);
+  assert.match(creds, /kind: ExternalSecret/);
+  assert.equal(creds.match(/kind: ExternalSecret/g)?.length, 4);
+  assert.match(creds, /remoteRef:/);
+  assert.match(creds, /vixens\/prod\/apps\/60-services\/txo-fabric\/webui-bff/);
+  assert.match(job, /suspend: true/);
+  assert.match(job, /-f \/migrations\/001_oidc_login_transactions.sql/);
+  assert.match(job, /-f \/migrations\/002_global_browser_sessions.sql/);
+  assert.match(job, /GRANT SELECT, INSERT, DELETE/);
+  assert.doesNotMatch(job, /CREATE USER|SUPERUSER|DROP DATABASE|DROP TABLE/);
+  assert.match(sql1, /CREATE TABLE IF NOT EXISTS/);
+  assert.match(sql1, /CREATE INDEX IF NOT EXISTS/);
+  assert.match(sql2, /CREATE TABLE IF NOT EXISTS/);
+  assert.match(sql2, /CREATE INDEX IF NOT EXISTS/);
+  assert.doesNotMatch([creds, job, db].join(" "), /password:\s*["']?[A-Za-z0-9]{12,}/);
+});
