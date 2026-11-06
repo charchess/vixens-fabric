@@ -1,0 +1,33 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hermes-umi
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/charchess/vixens-fabric.git
+    targetRevision: d09df0b47de4a69f56c71fb8b398994f6a73fc31
+    path: apps/60-services/hermes/overlays/dev
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: services
+  # This stateful Hermes instance deliberately requires reviewed manual sync.
+  # Its retained PVC contains active private data; source-only validation is
+  # not evidence of end-to-end agent, peer, or Hindsight functionality.
+  # Enable automation only after physical acceptance and an approved rollback
+  # plan; never implicitly prune, replace, or rebind the retained claim.
+  syncPolicy:
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
