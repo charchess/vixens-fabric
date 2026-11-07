@@ -1,0 +1,54 @@
+name: Tag development release
+
+on:
+  workflow_run:
+    workflows: [Repository validation]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: development-release-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  tag-development-release:
+    name: Tag development release
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Create immutable development tag and update local channel
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          short_sha="${SHA:0:7}"
+          immutable_tag="dev-v$(date -u +%Y.%m).${short_sha}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --tags --force origin
+
+          existing="$(git ls-remote origin "refs/tags/${immutable_tag}^{}" | awk '{print $1}')"
+          if [ -n "$existing" ] && [ "$existing" != "$SHA" ]; then
+            echo "immutable tag ${immutable_tag} already points to ${existing}" >&2
+            exit 1
+          fi
+          if [ -z "$existing" ]; then
+            git tag -a "$immutable_tag" "$SHA" -m "Development release ${immutable_tag}"
+            git push origin "refs/tags/${immutable_tag}"
+          fi
+
+          git tag -fa dev-latest "$SHA" -m "Development channel ${immutable_tag}"
+          test "$(git rev-parse dev-latest^{})" = "$SHA"
+          git push --force origin refs/tags/dev-latest
+          test "$(git ls-remote origin 'refs/tags/dev-latest^{}' | awk '{print $1}')" = "$SHA"
