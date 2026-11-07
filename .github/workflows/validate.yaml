@@ -29,14 +29,33 @@ jobs:
       - name: Reject whitespace errors
         run: git diff --check HEAD^ HEAD
 
+  release-channel-invariants:
+    name: Release channel invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate release workflow invariants
+        run: python3 scripts/test-release-channel.py
+      - name: Install actionlint
+        run: |
+          curl --fail --silent --show-error --location \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz \
+            -o actionlint.tar.gz
+          tar -xzf actionlint.tar.gz actionlint
+          chmod +x actionlint
+      - name: Lint GitHub Actions workflows
+        run: ./actionlint .github/workflows/*.yaml
+
   validation-summary:
     name: Validation Summary
     if: always()
-    needs: [repository-hygiene]
+    needs: [repository-hygiene, release-channel-invariants]
     runs-on: ubuntu-latest
     steps:
       - name: Fail closed on a non-success prerequisite
         env:
           HYGIENE: ${{ needs.repository-hygiene.result }}
+          RELEASE_CHANNEL: ${{ needs.release-channel-invariants.result }}
         run: |
           test "$HYGIENE" = success
+          test "$RELEASE_CHANNEL" = success

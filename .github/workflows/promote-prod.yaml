@@ -1,0 +1,89 @@
+name: Promote production release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dev_candidate:
+        description: Exact immutable development tag to promote (for example dev-v2026.11.abcdef0)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  promote-production-release:
+    name: Promote production release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify candidate and production preconditions
+        id: candidate
+        env:
+          CANDIDATE: ${{ inputs.dev_candidate }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          case "$CANDIDATE" in
+            dev-v[0-9][0-9][0-9][0-9].[0-9][0-9].*) ;;
+            *) echo "dev_candidate must be an exact dev-vYYYY.MM.<PR-or-short-sha> tag" >&2; exit 1 ;;
+          esac
+          if ! printf '%s\n' "$CANDIDATE" | grep -Eq '^dev-v[0-9]{4}\.[0-9]{2}\.([0-9]+|[0-9a-f]{7,40})$'; then
+            echo "dev_candidate must be an exact immutable development tag" >&2
+            exit 1
+          fi
+
+          git fetch --force origin "refs/tags/${CANDIDATE}:refs/tags/${CANDIDATE}" main
+          git show-ref --verify --quiet "refs/tags/${CANDIDATE}"
+          sha="$(git rev-parse "${CANDIDATE}^{commit}")"
+          git merge-base --is-ancestor "$sha" origin/main
+
+          curl --fail --silent --show-error --location \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/workflows/validate.yaml/runs?head_sha=${sha}&status=completed&per_page=100" \
+            -o validation-runs.json
+          python3 - "$sha" <<'PY'
+          import json
+          import sys
+
+          sha = sys.argv[1]
+          with open("validation-runs.json", encoding="utf-8") as handle:
+              runs = json.load(handle).get("workflow_runs", [])
+          if not any(run.get("head_sha") == sha and run.get("conclusion") == "success" for run in runs):
+              raise SystemExit("Repository validation has not succeeded for the candidate SHA")
+          PY
+
+          prod_tag="prod-v${CANDIDATE#dev-v}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${prod_tag}" >/dev/null 2>&1; then
+            echo "immutable production tag ${prod_tag} already exists" >&2
+            exit 1
+          fi
+          printf 'sha=%s\nprod_tag=%s\n' "$sha" "$prod_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Create immutable production tag and update local stable channel
+        env:
+          SHA: ${{ steps.candidate.outputs.sha }}
+          PROD_TAG: ${{ steps.candidate.outputs.prod_tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git tag -a "$PROD_TAG" "$SHA" -m "Production release ${PROD_TAG}"
+          git push origin "refs/tags/${PROD_TAG}"
+
+          git tag -fa prod-stable "$SHA" -m "Production stable ${PROD_TAG}"
+          test "$(git rev-parse prod-stable^{})" = "$SHA"
+          git push --force origin refs/tags/prod-stable
+
+          test "$(git ls-remote origin "refs/tags/${PROD_TAG}^{}" | awk '{print $1}')" = "$SHA"
+          test "$(git ls-remote origin 'refs/tags/prod-stable^{}' | awk '{print $1}')" = "$SHA"
