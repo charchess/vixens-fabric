@@ -101,6 +101,7 @@ export function createFabricOIDCLogin({
     tenantKey, issuer, clientId, fetchImpl, now,
     ...(tenantKey === "hairem" ? {
       expectedAuthentikUserUUID: "048248d9-5dce-427a-8585-960d34ef35ec",
+      expectedAuthentikSubject: "charchess",
       requiredGroup: "txo-fabric-hairem-client0",
     } : {}),
   });

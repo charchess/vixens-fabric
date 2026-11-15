@@ -351,7 +351,7 @@ test("selected GitOps manifests enable only reviewed BFF gates and lack Hermes A
   const egress = read("../runtime/networkpolicy.yaml");
   const overlay = read("../../overlays/prod/kustomization.yaml");
   assert.match(bff, /name: TXO_WEBUI_BFF_BROWSER_ENABLED\s+value: "true"/);
-  assert.match(manager, /name: TXO_FABRIC_PRIVATE_BRIDGE_ENABLED\s+value: "false"/);
+  assert.match(manager, /name: TXO_FABRIC_PRIVATE_BRIDGE_ENABLED\s+value: "true"/);
   assert.doesNotMatch(generator, /API_SERVER_ENABLED|API_SERVER_KEY|8642/);
   assert.doesNotMatch(egress, /port: 8642|0\.0\.0\.0\/0/);
   assert.doesNotMatch(overlay, /hermes-api-server|hermes-api-credential/);

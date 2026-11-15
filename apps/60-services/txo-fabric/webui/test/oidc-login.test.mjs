@@ -10,7 +10,7 @@ const authentikOrigin = "https://authentik.truxonline.com";
 const redirectURI = "https://chat-hairem.truxonline.com/auth/callback";
 const domainSuffix = "truxonline.com";
 const accountUUID = "048248d9-5dce-427a-8585-960d34ef35ec";
-const sub = "opaque-hashed-sub-not-a-uuid";
+const sub = "charchess";
 const fabricUserId = "usr" + "a".repeat(32);
 const seconds = 1797000000;
 const millis = seconds * 1000;
@@ -266,10 +266,14 @@ test("cross-tenant state cannot be spent in another tenant coordinator", async (
   assert.equal(a.enrollments.length, 0);
 });
 
-test("bad nonce or forged ID token never calls the privileged enrollment service", async () => {
+test("MVP binding accepts canonical identity and rejects UUID, groups, subject, tenant and roster divergence", async () => {
   for (const tokenClaims of [
     { nonce: "wrong-server-nonce" },
     { txo_fabric_user_uuid: "not-a-uuid" },
+    { txo_fabric_user_uuid: "87654321-4321-4321-8321-ba0987654321" },
+    { groups: [] },
+    { groups: ["client0"] },
+    { sub: "not-charchess" },
     { aud: "txo-fabric-indiba" },
     { iss: "https://evil.example/" },
     { exp: seconds - 1 },

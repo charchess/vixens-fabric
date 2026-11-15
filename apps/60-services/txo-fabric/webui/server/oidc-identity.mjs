@@ -82,7 +82,7 @@ function trustedJWKSURL(value, expectedIssuer) {
  * principal.verified, create a session, grant access, or register a route.
  */
 export function createAuthentikIdentityVerifier({
-  tenantKey, issuer, clientId, expectedAuthentikUserUUID, requiredGroup, fetchImpl = fetch,
+  tenantKey, issuer, clientId, expectedAuthentikUserUUID, expectedAuthentikSubject, requiredGroup, fetchImpl = fetch,
   now = () => Date.now(),
 }) {
   const expectedIssuer = trustedIssuer(tenantKey, issuer, clientId);
@@ -107,6 +107,7 @@ export function createAuthentikIdentityVerifier({
     const t = Math.floor(now() / 1000);
     if (!Number.isSafeInteger(t) || claims.iss !== expectedIssuer.href ||
         claims.aud !== clientId || !SAFE_SUBJECT.test(claims.sub || "") ||
+        (expectedAuthentikSubject !== undefined && claims.sub !== expectedAuthentikSubject) ||
         !UUID.test(claims.txo_fabric_user_uuid || "") ||
         (expectedAuthentikUserUUID !== undefined && claims.txo_fabric_user_uuid !== expectedAuthentikUserUUID) ||
         (requiredGroup !== undefined && (!Array.isArray(claims.groups) ||
