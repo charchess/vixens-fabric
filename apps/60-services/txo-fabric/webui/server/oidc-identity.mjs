@@ -82,7 +82,7 @@ function trustedJWKSURL(value, expectedIssuer) {
  * principal.verified, create a session, grant access, or register a route.
  */
 export function createAuthentikIdentityVerifier({
-  tenantKey, issuer, clientId, fetchImpl = fetch,
+  tenantKey, issuer, clientId, expectedAuthentikUserUUID, requiredGroup, fetchImpl = fetch,
   now = () => Date.now(),
 }) {
   const expectedIssuer = trustedIssuer(tenantKey, issuer, clientId);
