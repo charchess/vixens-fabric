@@ -108,6 +108,9 @@ export function createAuthentikIdentityVerifier({
     if (!Number.isSafeInteger(t) || claims.iss !== expectedIssuer.href ||
         claims.aud !== clientId || !SAFE_SUBJECT.test(claims.sub || "") ||
         !UUID.test(claims.txo_fabric_user_uuid || "") ||
+        (expectedAuthentikUserUUID !== undefined && claims.txo_fabric_user_uuid !== expectedAuthentikUserUUID) ||
+        (requiredGroup !== undefined && (!Array.isArray(claims.groups) ||
+          !claims.groups.every((group) => typeof group === "string") || !claims.groups.includes(requiredGroup))) ||
         claims.nonce !== expectedNonce ||
         !Number.isSafeInteger(claims.iat) || !Number.isSafeInteger(claims.exp) ||
         claims.iat > t + CLOCK_SKEW_SECONDS ||
