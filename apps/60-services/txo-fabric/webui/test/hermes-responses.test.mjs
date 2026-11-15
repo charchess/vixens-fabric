@@ -333,7 +333,7 @@ test("stateless service never requires BFF SQL or changes selected production", 
   const bootstrap = doc("../bootstrap/migrate-job.yaml");
   const prod = doc("../../overlays/prod/kustomization.yaml");
   const bff = doc("../server/private-bff-main.mjs");
-  assert.match(deployment,/name: TXO_WEBUI_BFF_BROWSER_ENABLED\s+value: "false"/);
+  assert.match(deployment,/name: TXO_WEBUI_BFF_BROWSER_ENABLED\s+value: "true"/);
   assert.match(operator,/name: TXO_FABRIC_PRIVATE_BRIDGE_ENABLED\s+value: "false"/);
   assert.doesNotMatch(bootstrap,/003_fabric_chat_threads/);
   assert.doesNotMatch(prod,/hermes-api-|003_fabric_chat_threads/);
