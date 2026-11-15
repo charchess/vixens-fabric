@@ -9,7 +9,7 @@ import { createGlobalAuthHttp, createGlobalWebUIApp } from "../server/global-aut
 const origin = "https://fabric.truxonline.com";
 const idp = "https://authentik.truxonline.com";
 const issuer = idp + "/application/o/txo-fabric-webui/";
-const userUUID = "test-user-uuid";
+const userUUID = "00000000-0000-4000-8000-000000000001";
 const sub = "opaque-global-subject-987";
 const now = 1_797_000_000_000;
 const nonceHash = s => createHash("sha256").update(s).digest("base64url");

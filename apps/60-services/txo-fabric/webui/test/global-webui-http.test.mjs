@@ -4,7 +4,7 @@ import { createGlobalWebUIHandler } from "../server/global-webui-http.mjs";
 
 const origin = "https://fabric.truxonline.com";
 const issuer = "https://authentik.truxonline.com/application/o/txo-fabric-webui/";
-const uuid = "test-user-uuid";
+const uuid = "00000000-0000-4000-8000-000000000001";
 const user = "usr" + "e".repeat(32);
 const tenants = [
   { tenantKey: "hairem", fabricTenantId: "TEN00001", displayName: "hAIrem" },

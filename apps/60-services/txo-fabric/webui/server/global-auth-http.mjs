@@ -1,6 +1,7 @@
 import { createGlobalOIDCLogin, GLOBAL_OIDC_BINDING_COOKIE } from "./global-oidc-login.mjs";
 import { createFabricOIDCLogin } from "./oidc-login.mjs";
 import { createGlobalWebUIHandler } from "./global-webui-http.mjs";
+import { createMvpCatalogBoundary } from "./mvp-catalog-boundary.mjs";
 
 const SESSION_COOKIE = "__Host-txo-fabric-session";
 const AUTH_REQUEST = "auth";
@@ -235,11 +236,15 @@ export function createGlobalWebUIApp({
   const auth = createGlobalAuthHttp({
     expectedOrigin, login, sessions, verifyActiveHuman, tenantProofs,
   });
+  // The MVP publishes exactly one reviewed tenant and the 13 canonical
+  // AgentIdentity keys. Membership/FGA remains revalidated downstream.
+  const mvp = createMvpCatalogBoundary({ listTenantCatalog, getTenantChat });
   const app = createGlobalWebUIHandler({
     expectedOrigin,
     expectedIssuer: authentikOrigin + "/application/o/txo-fabric-webui/",
     authenticate: auth.authenticate,
-    listTenantCatalog, resolveTenantAccess, getTenantChat, browserArtifacts,
+    listTenantCatalog: mvp.listTenantCatalog,
+    resolveTenantAccess, getTenantChat: mvp.getTenantChat, browserArtifacts,
     resolvePlatformAccess, enrollTenant,
   });
   return async function handle(request) {

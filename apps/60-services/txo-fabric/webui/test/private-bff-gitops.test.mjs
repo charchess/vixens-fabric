@@ -25,11 +25,11 @@ test("BFF, ingress and global OIDC use fabric.truxonline.com as the exact public
   const runtime = read("server/private-bff-server.mjs");
   const login = read("server/global-oidc-login.mjs");
   const ingress = read("runtime/ingress.yaml");
-  const authentik = read("../../../03-security/authentik/base/configmap.yaml");
+  const operatorBlueprint = read("../operator/internal/controller/tenantbundle_authentik.go");
   const vite = read("client/vite.config.ts");
-  for (const source of [runtime, ingress, authentik]) assert.match(source, /fabric\.truxonline\.com/);
+  for (const source of [runtime, ingress, operatorBlueprint]) assert.match(source, /fabric\.truxonline\.com/);
   assert.match(login, /expectedOrigin \+ "\/auth\/callback"/);
-  assert.doesNotMatch([runtime, ingress, authentik].join("\n"), /webui\.truxonline\.com/);
+  assert.doesNotMatch([runtime, ingress, operatorBlueprint].join("\n"), /webui\.truxonline\.com/);
   assert.match(vite, /manifest: "asset-manifest\.json"/);
   assert.match(vite, /sourcemap: false/);
 });
