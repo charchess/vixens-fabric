@@ -42,13 +42,13 @@ spec:
           image: ghcr.io/charchess/txo-fabric-webui-bff@sha256:4256c2ac1218be549a64169edb714126b58826de457d14a096ff98409bc96fc6
           imagePullPolicy: IfNotPresent
           env:
-            # Runtime refuses to start unless the literal value is "false".
+            # Browser and private Fabric bridge are jointly enabled; mixed states fail closed.
             - name: TXO_WEBUI_BFF_BROWSER_ENABLED
-              value: "false"
+              value: "true"
             # Browser and private Fabric bridge are an atomic, separately
             # reviewed activation. Do not set one without the other.
             - name: TXO_FABRIC_PRIVATE_BRIDGE_ENABLED
-              value: "false"
+              value: "true"
             - name: PORT
               value: "3000"
             - name: PGHOST

@@ -9,8 +9,8 @@ const clientId = "txo-fabric-hairem";
 const authentikOrigin = "https://authentik.truxonline.com";
 const redirectURI = "https://chat-hairem.truxonline.com/auth/callback";
 const domainSuffix = "truxonline.com";
-const accountUUID = "12345678-1234-4123-8123-1234567890ab";
-const sub = "opaque-hashed-sub-not-a-uuid";
+const accountUUID = "048248d9-5dce-427a-8585-960d34ef35ec";
+const sub = "charchess";
 const fabricUserId = "usr" + "a".repeat(32);
 const seconds = 1797000000;
 const millis = seconds * 1000;
@@ -21,7 +21,7 @@ const token = (claims) => {
   const payload = [
     { alg: "RS256", kid: jwk.kid, typ: "JWT" },
     { iss: issuer, aud: clientId, sub, iat: seconds - 10, exp: seconds + 100,
-      txo_fabric_user_uuid: accountUUID, ...claims },
+      txo_fabric_user_uuid: accountUUID, groups: ["txo-fabric-hairem-client0"], ...claims },
   ].map((value) => Buffer.from(JSON.stringify(value)).toString("base64url")).join(".");
   return payload + "." + sign("RSA-SHA256", Buffer.from(payload), privateKey).toString("base64url");
 };
@@ -266,10 +266,14 @@ test("cross-tenant state cannot be spent in another tenant coordinator", async (
   assert.equal(a.enrollments.length, 0);
 });
 
-test("bad nonce or forged ID token never calls the privileged enrollment service", async () => {
+test("MVP binding accepts canonical identity and rejects UUID, groups, subject, tenant and roster divergence", async () => {
   for (const tokenClaims of [
     { nonce: "wrong-server-nonce" },
     { txo_fabric_user_uuid: "not-a-uuid" },
+    { txo_fabric_user_uuid: "87654321-4321-4321-8321-ba0987654321" },
+    { groups: [] },
+    { groups: ["client0"] },
+    { sub: "not-charchess" },
     { aud: "txo-fabric-indiba" },
     { iss: "https://evil.example/" },
     { exp: seconds - 1 },
