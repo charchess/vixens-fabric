@@ -7,7 +7,7 @@ import { createPostgresGlobalSessions } from "../server/global-postgres-sessions
 const issuer = "https://authentik.truxonline.com/application/o/txo-fabric-webui/";
 const identity = Object.freeze({
   issuer, oidcSubject: "signed-and-verified-global-opaque-subject",
-  authentikUserUUID: "test-user-uuid",
+  authentikUserUUID: "00000000-0000-4000-8000-000000000001",
 });
 const now = 1_797_000_000_000;
 const digest = token => createHash("sha256").update(token).digest("base64url");

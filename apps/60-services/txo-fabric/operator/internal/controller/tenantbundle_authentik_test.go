@@ -310,10 +310,20 @@ func TestTenantIAMValidationMatrix(t *testing.T) {
 	}
 }
 
-func TestRenderAuthentikBlueprintWithNoActiveTenantIsExplicitlyEmpty(t *testing.T) {
+func TestRenderAuthentikBlueprintAlwaysIncludesGlobalWebUIProvider(t *testing.T) {
 	blueprint := renderAuthentikBlueprint(nil)
-	if blueprint != "version: 1\nmetadata:\n  name: txo-fabric-tenants-generated\nentries: []\n" {
-		t.Fatalf("empty blueprint changed unexpectedly:\n%s", blueprint)
+	for _, want := range []string{
+		"id: txo-fabric-webui-provider",
+		"client_id: txo-fabric-webui",
+		"url: https://fabric.truxonline.com/auth/callback",
+		"id: txo-fabric-webui-immutable-human-uuid-scope",
+	} {
+		if !strings.Contains(blueprint, want) {
+			t.Fatalf("global browser blueprint missing %q:\n%s", want, blueprint)
+		}
+	}
+	if strings.Contains(blueprint, "refresh_token") || strings.Contains(blueprint, "client_secret") {
+		t.Fatalf("global browser blueprint widened OAuth surface:\n%s", blueprint)
 	}
 }
 
@@ -512,9 +522,12 @@ func TestReconcileAuthentikBlueprintEmptiesWhenLastHumanTenantWithdraws(t *testi
 	if err := c.Get(ctx, types.NamespacedName{Name: authentikBlueprintConfigMapName, Namespace: authentikNamespace}, &current); err != nil {
 		t.Fatal(err)
 	}
-	want := "version: 1\nmetadata:\n  name: txo-fabric-tenants-generated\nentries: []\n"
-	if got := current.Data[authentikBlueprintKey]; got != want {
-		t.Fatalf("last human tenant withdrawal did not publish explicit empty blueprint:\n%s", got)
+	got := current.Data[authentikBlueprintKey]
+	if strings.Contains(got, "stale") || !strings.Contains(got, "id: txo-fabric-webui-provider") {
+		t.Fatalf("last human tenant withdrawal did not retain global browser blueprint:\n%s", got)
+	}
+	if strings.Contains(got, "txo-fabric-"+tenant.Name+"-provider") {
+		t.Fatalf("withdrawn tenant remained in blueprint:\n%s", got)
 	}
 }
 

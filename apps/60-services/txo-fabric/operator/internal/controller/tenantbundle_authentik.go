@@ -11,7 +11,6 @@ import (
 
 	fabricv1alpha1 "github.com/charchess/vixens/apps/60-services/txo-fabric/operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -87,11 +86,12 @@ func activeIAMBundles(bundles []fabricv1alpha1.TenantBundle) []fabricv1alpha1.Te
 
 func renderAuthentikBlueprint(bundles []fabricv1alpha1.TenantBundle) string {
 	active := activeIAMBundles(bundles)
-	if len(active) == 0 {
-		return "version: 1\nmetadata:\n  name: txo-fabric-tenants-generated\nentries: []\n"
-	}
 	var out strings.Builder
 	out.WriteString("version: 1\nmetadata:\n  name: txo-fabric-tenants-generated\nentries:\n")
+	// This single platform-owned browser client is intentionally independent
+	// from every tenant provider. Its exact callback is the public Fabric BFF;
+	// the client carries identity proof only, never tenant grants or secrets.
+	out.WriteString("  - model: authentik_providers_oauth2.scopemapping\n    id: txo-fabric-webui-immutable-human-uuid-scope\n    identifiers:\n      name: TXO Fabric WebUI immutable human UUID\n    attrs:\n      scope_name: txo_fabric_identity\n      description: Fabric signed immutable Authentik user UUID\n      expression: |\n        return {\"txo_fabric_user_uuid\": str(request.user.uuid)}\n\n  - model: authentik_providers_oauth2.oauth2provider\n    id: txo-fabric-webui-provider\n    identifiers:\n      name: txo-fabric-webui\n    attrs:\n      client_id: txo-fabric-webui\n      client_type: public\n      include_claims_in_id_token: true\n      authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]\n      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-explicit-consent]]\n      invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]\n      signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]\n      grant_types:\n        - authorization_code\n      property_mappings:\n        - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-openid]]\n        - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-email]]\n        - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-profile]]\n        - !KeyOf txo-fabric-webui-immutable-human-uuid-scope\n      redirect_uris:\n        - matching_mode: strict\n          url: https://fabric.truxonline.com/auth/callback\n          redirect_uri_type: authorization\n\n  - model: authentik_core.application\n    id: txo-fabric-webui-app\n    identifiers:\n      slug: txo-fabric-webui\n    attrs:\n      name: TXO Fabric WebUI\n      policy_engine_mode: any\n      provider: !KeyOf txo-fabric-webui-provider\n\n")
 	// One shared source mapping is linked to every tenant provider. The claim
 	// comes from Authentik's immutable user UUID, never a mutable username or sub.
 	// The Fabric BFF must explicitly request txo_fabric_identity on login.
@@ -148,15 +148,9 @@ func (r *TenantBundleReconciler) reconcileAuthentikBlueprint(ctx context.Context
 		return err
 	}
 	active := activeIAMBundles(bundles.Items)
+	// The global Fabric browser OIDC blueprint is valid without a tenant;
+	// publish it so the BFF callback contract is structurally available.
 	configMap := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: authentikBlueprintConfigMapName, Namespace: authentikNamespace}}
-	if len(active) == 0 {
-		if err := r.Get(ctx, client.ObjectKeyFromObject(configMap), configMap); err != nil {
-			if apierrors.IsNotFound(err) {
-				return nil
-			}
-			return err
-		}
-	}
 	content := renderAuthentikBlueprint(active)
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, configMap, func() error {
 		configMap.Labels = map[string]string{
