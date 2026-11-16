@@ -2,25 +2,37 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: txo-fabric-openbao-bootstrap
+  name: txo-fabric-cerbera-cycle-test
   namespace: txo-fabric-system
   labels:
-    app.kubernetes.io/name: txo-fabric-openbao-bootstrap
+    app.kubernetes.io/name: txo-fabric-cerbera-cycle-test
     app.kubernetes.io/component: secret-plane-bootstrap
     app.kubernetes.io/part-of: txo-fabric
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: txo-fabric-cerbera-cycle-test-tokenreview
+  labels:
+    app.kubernetes.io/part-of: txo-fabric
+    app.kubernetes.io/component: secret-plane-bootstrap
+rules:
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: txo-fabric-openbao-bootstrap-tokenreview
+  name: txo-fabric-cerbera-cycle-test-tokenreview
   labels:
     app.kubernetes.io/part-of: txo-fabric
     app.kubernetes.io/component: secret-plane-bootstrap
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: system:auth-delegator
+  name: txo-fabric-cerbera-cycle-test-tokenreview
 subjects:
   - kind: ServiceAccount
-    name: txo-fabric-openbao-bootstrap
+    name: txo-fabric-cerbera-cycle-test
     namespace: txo-fabric-system
