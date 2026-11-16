@@ -23,7 +23,8 @@ spec:
     spec:
       serviceAccountName: txo-fabric-cerbera-cycle-test
       restartPolicy: Never
-      automountServiceAccountToken: true
+      # Only the explicit, audience-scoped reviewer projection below is available.
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 100
