@@ -1,0 +1,35 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openbao-fabric-eso-clients
+  namespace: txo-fabric-system
+  labels:
+    app.kubernetes.io/name: openbao-fabric
+    app.kubernetes.io/component: secret-plane-client
+    app.kubernetes.io/part-of: txo-fabric
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: openbao-fabric
+      app.kubernetes.io/component: secret-plane
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: openbao-fabric
+              app.kubernetes.io/component: secret-plane-bootstrap
+      ports:
+        - port: 8200
+          protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: external-secrets
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: external-secrets
+      ports:
+        - port: 8200
+          protocol: TCP
