@@ -7,6 +7,7 @@ metadata:
   annotations:
     # Audit retention is independent from Raft data and is never an Argo prune target.
     argocd.argoproj.io/sync-options: Prune=false,Delete=false
+    argocd.argoproj.io/sync-wave: "-5"
   labels:
     app.kubernetes.io/component: secret-plane-audit
     app.kubernetes.io/name: openbao-fabric
