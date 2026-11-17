@@ -1,5 +1,9 @@
 ---
 - op: add
+  path: /metadata/annotations
+  value:
+    argocd.argoproj.io/sync-wave: "-4"
+- op: add
   path: /spec/template/spec/volumes/-
   value:
     name: audit
