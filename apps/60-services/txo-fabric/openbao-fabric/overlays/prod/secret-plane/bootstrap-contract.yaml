@@ -11,18 +11,25 @@ metadata:
     app.kubernetes.io/part-of: txo-fabric
   annotations:
     vixens.io/bootstrap-authority: out-of-git-platform-custody
-    vixens.io/bootstrap-state: blocked-awaiting-audit-sink
+    vixens.io/bootstrap-state: cerbera-hold-test-only
     vixens.io/infra-bootstrap-mount: kv
-    vixens.io/infra-bootstrap-record: bootstrap/fabric/prod/openbao-bootstrap
-    vixens.io/bootstrap-delivery: wrapping-one-use-15m
-    vixens.io/bootstrap-recovery: issue-new-wrap-only
-    vixens.io/bootstrap-revoke: immediate-after-fabric-readiness
+    vixens.io/infra-bootstrap-record: bootstrap/fabric/test/cerbera-cycle
+    vixens.io/bootstrap-identity: txo-fabric-cerbera-cycle-test
+    vixens.io/infra-test-endpoint: https://openbao.truxonline.com:443
+    vixens.io/infra-test-sni: openbao.truxonline.com
+    vixens.io/infra-test-ca-trust: system-trust/YR2
+    vixens.io/infra-test-tls-insecure: "false"
+    vixens.io/infra-test-http-fallback: deny
+    vixens.io/bootstrap-delivery: wrapping-one-use-5m
+    vixens.io/bootstrap-recovery: revoke-and-cleanup-test-only
+    vixens.io/bootstrap-revoke: immediate-on-stop-or-expiry
     vixens.io/runtime-deny-infra: "true"
     vixens.io/bridge-disabled-until-ready: "true"
+    vixens.io/test-consumer: none
     vixens.io/eso-store: openbao-fabric-store
     vixens.io/eso-service-account: txo-fabric-eso
     vixens.io/openbao-auth-mount: kubernetes
-    vixens.io/openbao-role: txo-fabric-eso-webui-bff
-    vixens.io/openbao-policy: txo-fabric-eso-webui-bff-v1
-    vixens.io/openbao-record: fabric/platform/txo-fabric/webui-bff
+    vixens.io/openbao-role: cerbera-cycle-test-pending
+    vixens.io/openbao-policy: cerbera-cycle-test-pending
+    vixens.io/openbao-record: bootstrap/fabric/test/cerbera-cycle
 immutable: true

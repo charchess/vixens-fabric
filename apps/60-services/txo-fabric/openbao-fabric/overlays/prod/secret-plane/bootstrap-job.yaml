@@ -11,6 +11,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-4"
 spec:
+  suspend: true
   backoffLimit: 1
   ttlSecondsAfterFinished: 300
   template:
@@ -20,9 +21,10 @@ spec:
         app.kubernetes.io/component: secret-plane-bootstrap
         app.kubernetes.io/part-of: txo-fabric
     spec:
-      serviceAccountName: txo-fabric-openbao-bootstrap
+      serviceAccountName: txo-fabric-cerbera-cycle-test
       restartPolicy: Never
-      automountServiceAccountToken: true
+      # Only the explicit, audience-scoped reviewer projection below is available.
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 100
@@ -68,7 +70,7 @@ spec:
         - name: bootstrap
           secret:
             # Created and rotated out-of-band by the platform custodian; never Git.
-            name: openbao-fabric-bootstrap-admin
+            name: openbao-fabric-cerbera-test-bootstrap
             items:
               - key: token
                 path: token
