@@ -21,10 +21,6 @@ spec:
         app.kubernetes.io/component: secret-plane-bootstrap
         app.kubernetes.io/part-of: txo-fabric
     spec:
-      hostAliases:
-        - ip: 192.168.111.69
-          hostnames:
-            - openbao.truxonline.com
       serviceAccountName: txo-fabric-cerbera-cycle-test
       restartPolicy: Never
       # Only the explicit, audience-scoped reviewer projection below is available.

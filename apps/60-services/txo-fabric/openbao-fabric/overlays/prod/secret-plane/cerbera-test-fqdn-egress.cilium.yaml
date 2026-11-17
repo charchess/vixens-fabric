@@ -1,0 +1,35 @@
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: openbao-fabric-cerbera-test-fqdn-egress
+  namespace: txo-fabric-system
+  labels:
+    app.kubernetes.io/name: openbao-fabric
+    app.kubernetes.io/component: secret-plane-bootstrap
+    app.kubernetes.io/part-of: txo-fabric
+  annotations:
+    vixens.io/cerbera-negative-tests: hostname-neighbor,nxdomain,unexpected-ip-tls
+    vixens.io/cerbera-expurgated-traces: required-before-go
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: openbao-fabric
+      app.kubernetes.io/component: secret-plane-bootstrap
+  enableDefaultDeny:
+    egress: true
+  egress:
+    - toCIDR:
+        - 10.96.0.10/32
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toFQDNs:
+        - matchName: openbao.truxonline.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

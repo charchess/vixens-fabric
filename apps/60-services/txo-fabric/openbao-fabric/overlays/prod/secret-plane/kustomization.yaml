@@ -7,4 +7,5 @@ resources:
   - secret-store.yaml
   - openbao-client-networkpolicy.yaml
   - cerbera-test-egress-networkpolicy.yaml
+  - cerbera-test-fqdn-egress.cilium.yaml
 # bootstrap-rbac.yaml and bootstrap-job.yaml stay source-only until Cerbera GO.
