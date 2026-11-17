@@ -1,0 +1,86 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: openbao-fabric-eso-bootstrap
+  namespace: txo-fabric-system
+  labels:
+    app.kubernetes.io/name: openbao-fabric
+    app.kubernetes.io/component: secret-plane-bootstrap
+    app.kubernetes.io/part-of: txo-fabric
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  suspend: true
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: openbao-fabric
+        app.kubernetes.io/component: secret-plane-bootstrap
+        app.kubernetes.io/part-of: txo-fabric
+    spec:
+      serviceAccountName: txo-fabric-cerbera-cycle-test
+      restartPolicy: Never
+      # Only the explicit, audience-scoped reviewer projection below is available.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: configure
+          image: quay.io/openbao/openbao:2.6.2
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/contract/configure.sh"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: contract
+              mountPath: /contract
+              readOnly: true
+            - name: ca
+              mountPath: /var/run/openbao-ca
+              readOnly: true
+            - name: bootstrap
+              mountPath: /var/run/openbao-bootstrap
+              readOnly: true
+            - name: reviewer
+              mountPath: /var/run/secrets/tokens
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: contract
+          configMap:
+            name: openbao-fabric-eso-bootstrap-contract
+            defaultMode: 0440
+        - name: ca
+          secret:
+            name: openbao-fabric-ca
+            items:
+              - key: tls.crt
+                path: tls.crt
+        - name: bootstrap
+          secret:
+            # Created and rotated out-of-band by the platform custodian; never Git.
+            name: openbao-fabric-cerbera-test-bootstrap
+            items:
+              - key: token
+                path: token
+        - name: reviewer
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: reviewer
+                  audience: https://kubernetes.default.svc
+                  expirationSeconds: 600
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi

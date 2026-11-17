@@ -1,0 +1,11 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - eso-identity.yaml
+  - bootstrap-contract.yaml
+  - secret-store.yaml
+  - openbao-client-networkpolicy.yaml
+  - cerbera-test-egress-networkpolicy.yaml
+  - cerbera-test-fqdn-egress.cilium.yaml
+# bootstrap-rbac.yaml and bootstrap-job.yaml stay source-only until Cerbera GO.

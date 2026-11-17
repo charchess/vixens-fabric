@@ -1,0 +1,11 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: txo-fabric-eso
+  namespace: txo-fabric-system
+  labels:
+    app.kubernetes.io/name: txo-fabric-eso
+    app.kubernetes.io/component: secret-plane-client
+    app.kubernetes.io/part-of: txo-fabric
+automountServiceAccountToken: false
