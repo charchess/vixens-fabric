@@ -8,4 +8,6 @@ metadata:
     app.kubernetes.io/name: txo-fabric-eso
     app.kubernetes.io/component: secret-plane-client
     app.kubernetes.io/part-of: txo-fabric
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
 automountServiceAccountToken: false
