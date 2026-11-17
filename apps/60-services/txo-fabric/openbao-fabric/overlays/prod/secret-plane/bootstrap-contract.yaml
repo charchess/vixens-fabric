@@ -15,6 +15,11 @@ metadata:
     vixens.io/infra-bootstrap-mount: kv
     vixens.io/infra-bootstrap-record: bootstrap/fabric/test/cerbera-cycle
     vixens.io/bootstrap-identity: txo-fabric-cerbera-cycle-test
+    vixens.io/infra-test-endpoint: https://openbao.truxonline.com:443
+    vixens.io/infra-test-sni: openbao.truxonline.com
+    vixens.io/infra-test-ca-trust: system-trust/YR2
+    vixens.io/infra-test-tls-insecure: "false"
+    vixens.io/infra-test-http-fallback: deny
     vixens.io/bootstrap-delivery: wrapping-one-use-5m
     vixens.io/bootstrap-recovery: revoke-and-cleanup-test-only
     vixens.io/bootstrap-revoke: immediate-on-stop-or-expiry

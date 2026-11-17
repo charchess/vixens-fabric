@@ -19,5 +19,5 @@ spec:
         - ipBlock:
             cidr: 192.168.111.69/32
       ports:
-        - port: 8200
+        - port: 443
           protocol: TCP
