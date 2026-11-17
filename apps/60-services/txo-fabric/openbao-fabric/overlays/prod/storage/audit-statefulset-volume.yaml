@@ -1,0 +1,13 @@
+---
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: audit
+    persistentVolumeClaim:
+      claimName: openbao-fabric-audit
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value:
+    name: audit
+    mountPath: /openbao/audit
+    readOnly: false

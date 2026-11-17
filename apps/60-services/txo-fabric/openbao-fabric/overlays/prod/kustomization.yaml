@@ -5,6 +5,7 @@ resources:
   - ../../base
   - secret-plane
   - storage/retained-pvc.yaml
+  - storage/audit-pvc.yaml
 patches:
   - target:
       group: apps
@@ -12,3 +13,9 @@ patches:
       kind: StatefulSet
       name: openbao-fabric
     path: storage/retained-statefulset-volume.yaml
+  - target:
+      group: apps
+      version: v1
+      kind: StatefulSet
+      name: openbao-fabric
+    path: storage/audit-statefulset-volume.yaml
