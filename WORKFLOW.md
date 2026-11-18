@@ -23,5 +23,7 @@ Argo CD revision changes/reconciliation and physical-platform acceptance are sep
 1. Does the change stay within this repository's responsibility?
 2. Are any new platform/service requirements declared through the contract model?
 3. Does it alter an active Argo CD owner, a release BOM, stateful identity, or a security boundary? If yes, stop and use the dedicated orchestration/migration issue.
-4. Are all applicable CI checks green, with no unexpected skipped required job?
-5. For production tags, has a human intentionally dispatched the promotion workflow with the exact approved development candidate?
+4. Does each `PersistentVolumeClaim` using a `WaitForFirstConsumer` StorageClass have its first consuming `Deployment`, `StatefulSet`, or `Job` in the same Argo sync wave (or an earlier one)? A claim with no consumer must not be committed as a standalone reservation.
+5. Does the rendered overlay prove both the claim and its consumer, including the exact `claimName` and sync-wave relationship? Add a focused regression test when the workload is stateful or has ordering constraints.
+6. Are all applicable CI checks green, with no unexpected skipped required job?
+7. For production tags, has a human intentionally dispatched the promotion workflow with the exact approved development candidate?
