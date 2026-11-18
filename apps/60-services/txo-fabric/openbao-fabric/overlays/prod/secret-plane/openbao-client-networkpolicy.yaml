@@ -4,6 +4,8 @@ kind: NetworkPolicy
 metadata:
   name: openbao-fabric-eso-clients
   namespace: txo-fabric-system
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
   labels:
     app.kubernetes.io/name: openbao-fabric
     app.kubernetes.io/component: secret-plane-client
