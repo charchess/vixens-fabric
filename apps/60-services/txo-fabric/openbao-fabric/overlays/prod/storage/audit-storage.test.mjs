@@ -155,7 +155,9 @@ test("audit storage aligns WFFC waves before its SecretStore", () => {
   const repoRoot = fileURLToPath(new URL("../../../../../../../", import.meta.url));
   const diffNames = execFileSync("git", ["diff", "--name-only", cnpgBase], { cwd: repoRoot, encoding: "utf8" }).trim().split("\n").filter(Boolean).sort();
   const esoOrderPolicyPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/secret-plane/openbao-client-networkpolicy.yaml";
-  assert.deepEqual(diffNames, [...cnpgPaths, cnpgTestPath, esoOrderPolicyPath].sort());
+  const esoTokenRequestRolePath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/secret-plane/eso-tokenrequest-rbac.yaml";
+  const esoTokenRequestKustomizationPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/secret-plane/kustomization.yaml";
+  assert.deepEqual(diffNames, [...cnpgPaths, cnpgTestPath, esoOrderPolicyPath, esoTokenRequestRolePath, esoTokenRequestKustomizationPath].sort());
   const manifestDiff = execFileSync("git", ["diff", "--no-ext-diff", cnpgBase, "--", ...cnpgPaths], { cwd: repoRoot, encoding: "utf8" });
   assert.equal(count(manifestDiff, /^-.*postgresql-shared-recovery$/gm), 5);
   assert.equal(count(manifestDiff, /^\+.*postgresql-shared$/gm), 5);
@@ -201,7 +203,9 @@ test("PR100 ESO ingress ordering is base-bound and fail-closed", () => {
   const renderedStatefulSet = renderedDocument(rendered, "StatefulSet", "openbao-fabric");
   const renderedStore = renderedDocument(rendered, "SecretStore", "openbao-fabric-store");
   const diffNames = execFileSync("git", ["diff", "--name-only", pr100Base], { cwd: repoRoot, encoding: "utf8" }).trim().split("\n").filter(Boolean).sort();
-  assert.deepEqual(diffNames, [policyPath, testPath].sort());
+  const tokenRequestRolePath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/secret-plane/eso-tokenrequest-rbac.yaml";
+  const tokenRequestKustomizationPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/secret-plane/kustomization.yaml";
+  assert.deepEqual(diffNames, [policyPath, testPath, tokenRequestRolePath, tokenRequestKustomizationPath].sort());
   const waveBlock = '  annotations:\n    argocd.argoproj.io/sync-wave: "-4"\n';
   assert.equal(policy.split(waveBlock).length - 1, 1);
   const normalizedPolicy = policy.replace(waveBlock, "");
@@ -230,3 +234,57 @@ test("PR100 ESO ingress ordering is base-bound and fail-closed", () => {
   for (const forbidden of [/^  egress:/m, /prune:/, /selfHeal:/, /allowEmpty:/, /syncOptions:/, /retry:/, /argocd\.argoproj\.io\/hook/, new RegExp("kind: " + "Sec" + "ret"), new RegExp("kind: " + "J" + "ob")]) assert.doesNotMatch(policy, forbidden);
 });
 // END CERBERE_PR100_ESO_FAIL_CLOSED_GUARD
+
+// BEGIN CERBERE_ESO_TOKENREQUEST_RBAC_GUARD
+test("ESO TokenRequest RBAC is exact and rendered fail-closed", () => {
+  const base = "3c3605e3c70d135ec67f6bb623614afa00923af7";
+  const rolePath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/secret-plane/eso-tokenrequest-rbac.yaml";
+  const kustomizationPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/secret-plane/kustomization.yaml";
+  const testPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/storage/audit-storage.test.mjs";
+  const repoRoot = fileURLToPath(new URL("../../../../../../../", import.meta.url));
+  const role = read("../secret-plane/eso-tokenrequest-rbac.yaml");
+  const kustomization = read("../secret-plane/kustomization.yaml");
+  const rendered = execFileSync("kustomize", ["build", fileURLToPath(new URL("../", import.meta.url))], { encoding: "utf8" });
+  const renderedRole = renderedDocument(rendered, "Role", "txo-fabric-eso-tokenrequest");
+  const renderedBinding = renderedDocument(rendered, "RoleBinding", "txo-fabric-eso-tokenrequest");
+  const changed = execFileSync("git", ["diff", "--name-only", base], { cwd: repoRoot, encoding: "utf8" }).trim().split("\n").filter(Boolean).sort();
+  assert.deepEqual(changed, [rolePath, kustomizationPath, testPath].sort());
+  assert.equal(role, `---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: txo-fabric-eso-tokenrequest
+  namespace: txo-fabric-system
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames: ["txo-fabric-eso"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: txo-fabric-eso-tokenrequest
+  namespace: txo-fabric-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: txo-fabric-eso-tokenrequest
+subjects:
+  - kind: ServiceAccount
+    name: external-secrets
+    namespace: external-secrets
+`);
+  assert.match(kustomization, /^  - eso-tokenrequest-rbac\.yaml$/m);
+  assert.equal(count(kustomization, /^  - eso-tokenrequest-rbac\.yaml$/gm), 1);
+  assert.ok(renderedRole); assert.ok(renderedBinding);
+  for (const doc of [renderedRole, renderedBinding]) assert.match(doc, /namespace: txo-fabric-system/);
+  assert.match(renderedRole, /resources:\n  - serviceaccounts\/token/);
+  assert.match(renderedRole, /resourceNames:\n  - txo-fabric-eso/);
+  assert.match(renderedRole, /verbs:\n  - create/);
+  assert.match(renderedBinding, /kind: Role\n  name: txo-fabric-eso-tokenrequest/);
+  assert.equal(count(renderedBinding, /name: external-secrets/g), 1);
+  assert.equal(count(renderedBinding, /namespace: external-secrets/g), 1);
+  for (const forbidden of [/\b(get|list|watch|update|patch|delete|deletecollection)\b/, /\["\*"\]/, /resources:.*secrets/, /ClusterRole/, /openbao-fabric-store/, /openbao-client-networkpolicy/]) assert.doesNotMatch(role, forbidden);
+});
+// END CERBERE_ESO_TOKENREQUEST_RBAC_GUARD
