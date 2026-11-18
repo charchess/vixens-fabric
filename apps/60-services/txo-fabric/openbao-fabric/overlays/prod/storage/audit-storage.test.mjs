@@ -137,6 +137,44 @@ test("audit storage aligns WFFC waves before its SecretStore", () => {
   assert.deepEqual(auditTokenLines(configLines), expectedAuditTokens);
   assert.deepEqual(auditTokenLines(renderedConfigLines), expectedAuditTokens);
   // CERBERE_SERVER_HCL_CONTRACT_END
+  // CERBERE_CNPG_STANDARDIZATION_GUARD_START
+  const cnpgBase = "e8782bb9efb81e1804e0a7f8244abd6c5930f134";
+  const cnpgPaths = [
+    "apps/60-services/txo-fabric/openfga/runtime/networkpolicy.yaml",
+    "apps/60-services/txo-fabric/gateway/database.yaml",
+    "apps/60-services/txo-fabric/gateway/networkpolicy.yaml",
+    "apps/60-services/txo-fabric/gateway/schema-upgrade-networkpolicy.yaml",
+  ];
+  const cnpgTestPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/storage/audit-storage.test.mjs";
+  const cnpgBaselines = new Map([
+    [cnpgPaths[0], "fc570cc30b2cb3cf37f8e769c131f9de7a689fe31cedf123492623a1e05f394d"],
+    [cnpgPaths[1], "3c908a161d611118cd0f6d1f2223f97608ccdf735efbeb644c4199929043a3d9"],
+    [cnpgPaths[2], "0d602aea8bb8fdc5234c5829454f23900e8b7a101382cb560af381698ef2eacd"],
+    [cnpgPaths[3], "e317e64cfe9821e94a6a0ed4642d4a321c30e3b7a0c3408e434b460d6587365b"],
+  ]);
+  const repoRoot = fileURLToPath(new URL("../../../../../../../", import.meta.url));
+  const diffNames = execFileSync("git", ["diff", "--name-only", cnpgBase], { cwd: repoRoot, encoding: "utf8" }).trim().split("\n").filter(Boolean).sort();
+  assert.deepEqual(diffNames, [...cnpgPaths, cnpgTestPath].sort());
+  const manifestDiff = execFileSync("git", ["diff", "--no-ext-diff", cnpgBase, "--", ...cnpgPaths], { cwd: repoRoot, encoding: "utf8" });
+  assert.equal(count(manifestDiff, /^-.*postgresql-shared-recovery$/gm), 5);
+  assert.equal(count(manifestDiff, /^\+.*postgresql-shared$/gm), 5);
+  const cnpgRead = rel => read(`../../../../../${rel.split("/").slice(3).join("/")}`);
+  for (const rel of cnpgPaths) {
+    const text = readFileSync(`${repoRoot}/${rel}`, "utf8");
+    assert.doesNotMatch(text, /postgresql-shared-recovery/);
+    const normalized = text.replaceAll("postgresql-shared", "__CNPG_SHARED_TARGET__");
+    assert.equal(createHash("sha256").update(normalized).digest("hex"), cnpgBaselines.get(rel));
+  }
+  const cnpgRendered = execFileSync("kubectl", ["kustomize", `${repoRoot}/apps/60-services/txo-fabric/overlays/prod`], { encoding: "utf8" });
+  for (const [kind, name] of [["NetworkPolicy", "txo-fabric-openfga"], ["NetworkPolicy", "txo-ai-gateway-access"], ["NetworkPolicy", "txo-ai-gateway-schema-upgrade-egress"], ["Database", "txo-ai-gateway-database"], ["DatabaseRole", "txo-ai-gateway-role"]]) {
+    const document = renderedDocument(cnpgRendered, kind, name);
+    assert.ok(document);
+    assert.doesNotMatch(document, /postgresql-shared-recovery/);
+    assert.match(document, /postgresql-shared/);
+    if (kind === "NetworkPolicy") assert.match(document, /port: 5432/);
+  }
+  for (const marker of ["kind: " + "Sec" + "ret", "string" + "Data:", "binary" + "Data:", "base" + "64", "kind: " + "Job", "migration", "/sys/" + "audit", "argocd"]) assert.equal(manifestDiff.includes(marker), false, `forbidden manifest diff marker: ${marker}`);
+  // CERBERE_CNPG_STANDARDIZATION_GUARD_END
 
   assert.match(runbook, /Electra owns/);
   assert.match(runbook, /80%/);
