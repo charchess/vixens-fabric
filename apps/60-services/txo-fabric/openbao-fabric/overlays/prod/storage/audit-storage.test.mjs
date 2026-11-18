@@ -10,7 +10,7 @@ const wave = source => source.match(/argocd\.argoproj\.io\/sync-wave: "(-?\d+)"/
 const renderedDocument = (rendered, kind, name) => rendered.split(/^---\s*$/m)
   .find(document => new RegExp(`kind: ${kind}\\n[\\s\\S]*?name: ${name}\\n`).test(document));
 
-test("audit storage sync ordering fails closed and preserves the isolated storage boundary", () => {
+test("audit storage aligns WFFC waves before its SecretStore", () => {
   const overlay = read("../kustomization.yaml");
   const pvc = read("./audit-pvc.yaml");
   const patch = read("./audit-statefulset-volume.yaml");
@@ -46,7 +46,7 @@ test("audit storage sync ordering fails closed and preserves the isolated storag
   assert.match(pvc, /storageClassName: storage-rwo-retain/);
   assert.match(pvc, /storage:\s+5Gi/);
   assert.match(pvc, /argocd\.argoproj\.io\/sync-options: Prune=false,Delete=false/);
-  assert.equal(wave(pvc), "-5");
+  assert.equal(wave(pvc), "-4");
 
   assert.doesNotMatch(statefulSet, /^  annotations:/m);
   assert.match(patch, /path: \/metadata\/annotations$/m);
@@ -58,12 +58,12 @@ test("audit storage sync ordering fails closed and preserves the isolated storag
   assert.match(patch, /readOnly: false/);
   assert.doesNotMatch(patch, /data-openbao-fabric-0-synelia|\/openbao\/data/);
   assert.equal(wave(secretStore), "-3");
-  assert.ok(Number(wave(pvc)) < -4 && -4 < Number(wave(secretStore)));
+  assert.ok(Number(wave(pvc)) < Number(wave(secretStore)));
 
   assert.ok(renderedPvc);
   assert.ok(renderedStatefulSet);
   assert.ok(renderedSecretStore);
-  assert.equal(wave(renderedPvc), "-5");
+  assert.equal(wave(renderedPvc), "-4");
   assert.equal(wave(renderedStatefulSet), "-4");
   assert.equal(wave(renderedSecretStore), "-3");
   assert.equal(renderedAnnotations?.trim(), 'argocd.argoproj.io/sync-wave: "-4"');
