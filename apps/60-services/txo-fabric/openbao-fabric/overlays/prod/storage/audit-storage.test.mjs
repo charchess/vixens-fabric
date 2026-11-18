@@ -154,7 +154,8 @@ test("audit storage aligns WFFC waves before its SecretStore", () => {
   ]);
   const repoRoot = fileURLToPath(new URL("../../../../../../../", import.meta.url));
   const diffNames = execFileSync("git", ["diff", "--name-only", cnpgBase], { cwd: repoRoot, encoding: "utf8" }).trim().split("\n").filter(Boolean).sort();
-  assert.deepEqual(diffNames, [...cnpgPaths, cnpgTestPath].sort());
+  const esoOrderPolicyPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/secret-plane/openbao-client-networkpolicy.yaml";
+  assert.deepEqual(diffNames, [...cnpgPaths, cnpgTestPath, esoOrderPolicyPath].sort());
   const manifestDiff = execFileSync("git", ["diff", "--no-ext-diff", cnpgBase, "--", ...cnpgPaths], { cwd: repoRoot, encoding: "utf8" });
   assert.equal(count(manifestDiff, /^-.*postgresql-shared-recovery$/gm), 5);
   assert.equal(count(manifestDiff, /^\+.*postgresql-shared$/gm), 5);
@@ -182,3 +183,16 @@ test("audit storage aligns WFFC waves before its SecretStore", () => {
   assert.match(runbook, /At saturation, stop audit-dependent qualification/);
   assert.match(runbook, /no GitOps delete, PVC deletion/);
 });
+
+
+// BEGIN CERBERE_ESO_INGRESS_ORDER_GUARD
+test("ESO ingress policy is ordered before SecretStore without WFFC drift", () => {
+  const policy = read("../secret-plane/openbao-client-networkpolicy.yaml");
+  const pvc = read("./audit-pvc.yaml"); const patch = read("./audit-statefulset-volume.yaml"); const secretStore = read("../secret-plane/secret-store.yaml");
+  const rendered = execFileSync("kustomize", ["build", fileURLToPath(new URL("../", import.meta.url))], { encoding: "utf8" });
+  const p = renderedDocument(rendered, "NetworkPolicy", "openbao-fabric-eso-clients"); const v = renderedDocument(rendered, "PersistentVolumeClaim", "openbao-fabric-audit"); const s = renderedDocument(rendered, "StatefulSet", "openbao-fabric"); const store = renderedDocument(rendered, "SecretStore", "openbao-fabric-store");
+  assert.equal(wave(policy), "-4"); assert.equal(count(policy, /port: 8200/g), 2); assert.match(policy, /kubernetes\.io\/metadata\.name: external-secrets/); assert.match(policy, /app\.kubernetes\.io\/name: external-secrets/); assert.match(policy, /component: secret-plane-bootstrap/); assert.doesNotMatch(policy, /policyTypes: \[Egress\]|prune:|selfHeal:|allowEmpty:|syncOptions:|retry:|argocd\.argoproj\.io\/hook/);
+  assert.equal(wave(pvc), "-4"); assert.equal(wave(patch), "-4"); assert.equal(wave(secretStore), "-3"); assert.ok(Number(wave(policy)) <= Number(wave(pvc))); assert.ok(Number(wave(policy)) < Number(wave(secretStore)));
+  assert.ok(p); assert.ok(v); assert.ok(s); assert.ok(store); assert.equal(wave(p), "-4"); assert.equal(wave(v), "-4"); assert.equal(wave(s), "-4"); assert.equal(wave(store), "-3"); assert.equal(count(p, /port: 8200/g), 2); assert.match(p, /kubernetes\.io\/metadata\.name: external-secrets/); assert.equal(count(s, /claimName: openbao-fabric-audit/g), 1); assert.equal(count(s, /mountPath: \/openbao\/audit/g), 1);
+});
+// END CERBERE_ESO_INGRESS_ORDER_GUARD
