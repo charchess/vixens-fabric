@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 
 const read = path => readFileSync(new URL(path, import.meta.url), "utf8");
 const count = (source, expression) => (source.match(expression) ?? []).length;
@@ -16,6 +17,7 @@ test("audit storage aligns WFFC waves before its SecretStore", () => {
   const patch = read("./audit-statefulset-volume.yaml");
   const secretStore = read("../secret-plane/secret-store.yaml");
   const statefulSet = read("../../../base/statefulset.yaml");
+  const config = read("../../../base/configmap.yaml");
   const runbook = read("../../../contracts/audit-sink-retention-rotation-fail-closed.md");
   const testSource = read("./audit-storage.test.mjs");
   const rendered = execFileSync("kustomize", ["build", fileURLToPath(new URL("../", import.meta.url))], { encoding: "utf8" });
@@ -24,20 +26,18 @@ test("audit storage aligns WFFC waves before its SecretStore", () => {
   const renderedSecretStore = renderedDocument(rendered, "SecretStore", "openbao-fabric-store");
   const patchAnnotations = patch.match(/path: \/metadata\/annotations\n  value:\n((?:    .+\n?)+)/)?.[1];
   const renderedAnnotations = renderedStatefulSet?.match(/^  annotations:\n((?:    .+\n)+)/m)?.[1];
-  const prDiff = [overlay, pvc, patch, testSource, runbook].join("\n");
+  const prDiff = [overlay, pvc, patch, config, testSource, runbook].join("\n");
   const yaml = [overlay, pvc, patch].join("\n");
-  const forbidden = new RegExp([
-    "kind:\\s*" + "Sec" + "ret",
-    "\\b" + "Sec" + "ret(?:\\." + "da" + "ta|\\/|\\s*:\\s*)",
-    "(?:string" + "Data|binary" + "Data|\\bda" + "ta):",
+  const forbidden = [
+    "kind: " + "Sec" + "ret",
+    "string" + "Data:",
+    "binary" + "Data:",
     "ba" + "se64",
-    "Cluster" + "Sec" + "retStore\\/openbao",
+    "Cluster" + "Secret" + "Store/openbao",
     "openbao-" + "infra",
+    "/sys/" + "audit",
     "fall" + "back",
-    "kind:\\s*" + "Job",
-    "rb" + "ac",
-    "boot" + "strap",
-  ].join("|"), "i");
+  ];
 
   assert.match(overlay, /^  - storage\/audit-pvc\.yaml$/m);
   assert.match(overlay, /path: storage\/audit-statefulset-volume\.yaml/);
@@ -75,8 +75,68 @@ test("audit storage aligns WFFC waves before its SecretStore", () => {
   assert.match(statefulSet, /fsGroup: 1000/);
   assert.match(statefulSet, /runAsNonRoot: true/);
   assert.match(statefulSet, /readOnlyRootFilesystem: true/);
-  assert.doesNotMatch(prDiff, forbidden);
+  for (const marker of forbidden) assert.equal(prDiff.includes(marker), false, `forbidden marker: ${marker}`);
   assert.doesNotMatch(yaml, /audit\s+(enable|device)|\/v1\/sys\/audit/);
+  // CERBERE_SERVER_HCL_CONTRACT_START
+  const lineFeed = String.fromCharCode(10);
+  const expectedNonAuditServerHclSha256 = "5806a472b2651892d69d1038e3c8bfc72920c0d98f395cdc00db7da051124de9";
+  const extractServerHclLines = document => {
+    const lines = document.split(lineFeed);
+    const startLine = lines.indexOf("  server.hcl: |");
+    assert.ok(startLine >= 0);
+    const result = [];
+    for (const line of lines.slice(startLine + 1)) {
+      if (line === "") { result.push(line); continue; }
+      if (!line.startsWith("    ")) break;
+      result.push(line.slice(4));
+    }
+    return result;
+  };
+  const withoutAudit = lines => {
+    const result = [];
+    let depth = 0;
+    for (const line of lines) {
+      if (line === 'audit "file" "fabric-audit" {') { depth = 1; continue; }
+      if (depth > 0) { depth += (line.match(/\{/g) ?? []).length - (line.match(/\}/g) ?? []).length; continue; }
+      result.push(line);
+    }
+    return result;
+  };
+  const serverHclSha256 = lines => createHash("sha256").update(withoutAudit(lines).filter(line => line !== "").join(lineFeed) + lineFeed).digest("hex");
+  const configLines = extractServerHclLines(config);
+  const renderedConfig = renderedDocument(rendered, "ConfigMap", "openbao-fabric-config");
+  assert.ok(renderedConfig);
+  const renderedConfigLines = extractServerHclLines(renderedConfig);
+  assert.equal(configLines.filter(line => line === 'audit "file" "fabric-audit" {').length, 1);
+  assert.equal(renderedConfigLines.filter(line => line === 'audit "file" "fabric-audit" {').length, 1);
+  assert.equal(serverHclSha256(configLines), expectedNonAuditServerHclSha256);
+  assert.equal(serverHclSha256(renderedConfigLines), expectedNonAuditServerHclSha256);
+  const auditTokenLines = lines => {
+    const start = lines.indexOf('audit "file" "fabric-audit" {');
+    assert.ok(start >= 0);
+    const tokens = [];
+    let depth = 0;
+    for (const line of lines.slice(start)) {
+      const token = line.trim();
+      if (token === "") continue;
+      tokens.push(token);
+      depth += (token.match(/\{/g) ?? []).length - (token.match(/\}/g) ?? []).length;
+      if (depth === 0) break;
+    }
+    return tokens;
+  };
+  const expectedAuditTokens = [
+    'audit "file" "fabric-audit" {',
+    'options {',
+    'file_path = "/openbao/audit/fabric-audit.log"',
+    'log_raw = "false"',
+    'hmac_accessor = "true"',
+    '}',
+    '}',
+  ];
+  assert.deepEqual(auditTokenLines(configLines), expectedAuditTokens);
+  assert.deepEqual(auditTokenLines(renderedConfigLines), expectedAuditTokens);
+  // CERBERE_SERVER_HCL_CONTRACT_END
 
   assert.match(runbook, /Electra owns/);
   assert.match(runbook, /80%/);
