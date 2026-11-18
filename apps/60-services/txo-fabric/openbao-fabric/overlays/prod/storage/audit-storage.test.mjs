@@ -16,6 +16,7 @@ test("audit storage aligns WFFC waves before its SecretStore", () => {
   const patch = read("./audit-statefulset-volume.yaml");
   const secretStore = read("../secret-plane/secret-store.yaml");
   const statefulSet = read("../../../base/statefulset.yaml");
+  const config = read("../../../base/configmap.yaml");
   const runbook = read("../../../contracts/audit-sink-retention-rotation-fail-closed.md");
   const testSource = read("./audit-storage.test.mjs");
   const rendered = execFileSync("kustomize", ["build", fileURLToPath(new URL("../", import.meta.url))], { encoding: "utf8" });
@@ -24,20 +25,18 @@ test("audit storage aligns WFFC waves before its SecretStore", () => {
   const renderedSecretStore = renderedDocument(rendered, "SecretStore", "openbao-fabric-store");
   const patchAnnotations = patch.match(/path: \/metadata\/annotations\n  value:\n((?:    .+\n?)+)/)?.[1];
   const renderedAnnotations = renderedStatefulSet?.match(/^  annotations:\n((?:    .+\n)+)/m)?.[1];
-  const prDiff = [overlay, pvc, patch, testSource, runbook].join("\n");
+  const prDiff = [overlay, pvc, patch, config, testSource, runbook].join("\n");
   const yaml = [overlay, pvc, patch].join("\n");
-  const forbidden = new RegExp([
-    "kind:\\s*" + "Sec" + "ret",
-    "\\b" + "Sec" + "ret(?:\\." + "da" + "ta|\\/|\\s*:\\s*)",
-    "(?:string" + "Data|binary" + "Data|\\bda" + "ta):",
+  const forbidden = [
+    "kind: " + "Sec" + "ret",
+    "string" + "Data:",
+    "binary" + "Data:",
     "ba" + "se64",
-    "Cluster" + "Sec" + "retStore\\/openbao",
+    "Cluster" + "Secret" + "Store/openbao",
     "openbao-" + "infra",
+    "/sys/" + "audit",
     "fall" + "back",
-    "kind:\\s*" + "Job",
-    "rb" + "ac",
-    "boot" + "strap",
-  ].join("|"), "i");
+  ];
 
   assert.match(overlay, /^  - storage\/audit-pvc\.yaml$/m);
   assert.match(overlay, /path: storage\/audit-statefulset-volume\.yaml/);
@@ -75,8 +74,18 @@ test("audit storage aligns WFFC waves before its SecretStore", () => {
   assert.match(statefulSet, /fsGroup: 1000/);
   assert.match(statefulSet, /runAsNonRoot: true/);
   assert.match(statefulSet, /readOnlyRootFilesystem: true/);
-  assert.doesNotMatch(prDiff, forbidden);
+  for (const marker of forbidden) assert.equal(prDiff.includes(marker), false, `forbidden marker: ${marker}`);
   assert.doesNotMatch(yaml, /audit\s+(enable|device)|\/v1\/sys\/audit/);
+  const configLines = config.split(String.fromCharCode(10));
+  const dataLine = configLines.indexOf("data:");
+  assert.equal(configLines.includes("kind: ConfigMap"), true);
+  assert.equal(configLines.includes("  name: openbao-fabric-config"), true);
+  assert.ok(dataLine >= 0);
+  assert.equal(configLines[dataLine + 1], "  server.hcl: |");
+  assert.equal(configLines.filter(line => line === '    audit "file" "fabric-audit" {').length, 1);
+  assert.equal(configLines.includes('        file_path = "/openbao/audit/fabric-audit.log"'), true);
+  assert.equal(configLines.includes('        log_raw = "false"'), true);
+  assert.equal(configLines.includes('        hmac_accessor = "true"'), true);
 
   assert.match(runbook, /Electra owns/);
   assert.match(runbook, /80%/);

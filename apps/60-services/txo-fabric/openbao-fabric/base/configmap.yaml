@@ -19,6 +19,14 @@ data:
       node_id = "openbao-fabric-0"
     }
 
+    audit "file" "fabric-audit" {
+      options {
+        file_path = "/openbao/audit/fabric-audit.log"
+        log_raw = "false"
+        hmac_accessor = "true"
+      }
+    }
+
     listener "tcp" {
       address = "0.0.0.0:8200"
       cluster_address = "127.0.0.1:8201"
