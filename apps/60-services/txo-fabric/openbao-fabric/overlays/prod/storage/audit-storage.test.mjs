@@ -184,15 +184,49 @@ test("audit storage aligns WFFC waves before its SecretStore", () => {
   assert.match(runbook, /no GitOps delete, PVC deletion/);
 });
 
-
-// BEGIN CERBERE_ESO_INGRESS_ORDER_GUARD
-test("ESO ingress policy is ordered before SecretStore without WFFC drift", () => {
+// BEGIN CERBERE_PR100_ESO_FAIL_CLOSED_GUARD
+test("PR100 ESO ingress ordering is base-bound and fail-closed", () => {
+  const pr100Base = "8c1c2c675b508f335c85b13be3b2faf59553a812";
+  const policyPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/secret-plane/openbao-client-networkpolicy.yaml";
+  const testPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/storage/audit-storage.test.mjs";
+  const normalizedPolicySha256 = "e19dac0fde2e19fafb1628c5c750fb46dd9a57ae4a9ba81b9e546068b224e4cf";
+  const repoRoot = fileURLToPath(new URL("../../../../../../../", import.meta.url));
   const policy = read("../secret-plane/openbao-client-networkpolicy.yaml");
-  const pvc = read("./audit-pvc.yaml"); const patch = read("./audit-statefulset-volume.yaml"); const secretStore = read("../secret-plane/secret-store.yaml");
+  const pvc = read("./audit-pvc.yaml");
+  const patch = read("./audit-statefulset-volume.yaml");
+  const secretStore = read("../secret-plane/secret-store.yaml");
   const rendered = execFileSync("kustomize", ["build", fileURLToPath(new URL("../", import.meta.url))], { encoding: "utf8" });
-  const p = renderedDocument(rendered, "NetworkPolicy", "openbao-fabric-eso-clients"); const v = renderedDocument(rendered, "PersistentVolumeClaim", "openbao-fabric-audit"); const s = renderedDocument(rendered, "StatefulSet", "openbao-fabric"); const store = renderedDocument(rendered, "SecretStore", "openbao-fabric-store");
-  assert.equal(wave(policy), "-4"); assert.equal(count(policy, /port: 8200/g), 2); assert.match(policy, /kubernetes\.io\/metadata\.name: external-secrets/); assert.match(policy, /app\.kubernetes\.io\/name: external-secrets/); assert.match(policy, /component: secret-plane-bootstrap/); assert.doesNotMatch(policy, /policyTypes: \[Egress\]|prune:|selfHeal:|allowEmpty:|syncOptions:|retry:|argocd\.argoproj\.io\/hook/);
-  assert.equal(wave(pvc), "-4"); assert.equal(wave(patch), "-4"); assert.equal(wave(secretStore), "-3"); assert.ok(Number(wave(policy)) <= Number(wave(pvc))); assert.ok(Number(wave(policy)) < Number(wave(secretStore)));
-  assert.ok(p); assert.ok(v); assert.ok(s); assert.ok(store); assert.equal(wave(p), "-4"); assert.equal(wave(v), "-4"); assert.equal(wave(s), "-4"); assert.equal(wave(store), "-3"); assert.equal(count(p, /port: 8200/g), 2); assert.match(p, /kubernetes\.io\/metadata\.name: external-secrets/); assert.equal(count(s, /claimName: openbao-fabric-audit/g), 1); assert.equal(count(s, /mountPath: \/openbao\/audit/g), 1);
+  const renderedPolicy = renderedDocument(rendered, "NetworkPolicy", "openbao-fabric-eso-clients");
+  const renderedPvc = renderedDocument(rendered, "PersistentVolumeClaim", "openbao-fabric-audit");
+  const renderedStatefulSet = renderedDocument(rendered, "StatefulSet", "openbao-fabric");
+  const renderedStore = renderedDocument(rendered, "SecretStore", "openbao-fabric-store");
+  const diffNames = execFileSync("git", ["diff", "--name-only", pr100Base], { cwd: repoRoot, encoding: "utf8" }).trim().split("\n").filter(Boolean).sort();
+  assert.deepEqual(diffNames, [policyPath, testPath].sort());
+  const waveBlock = '  annotations:\n    argocd.argoproj.io/sync-wave: "-4"\n';
+  assert.equal(policy.split(waveBlock).length - 1, 1);
+  const normalizedPolicy = policy.replace(waveBlock, "");
+  assert.equal(createHash("sha256").update(normalizedPolicy).digest("hex"), normalizedPolicySha256);
+  const basePolicy = execFileSync("git", ["show", `${pr100Base}:${policyPath}`], { cwd: repoRoot, encoding: "utf8" });
+  assert.equal(normalizedPolicy, basePolicy);
+  assert.match(policy, /^apiVersion: networking\.k8s\.io\/v1\nkind: NetworkPolicy\nmetadata:/m);
+  assert.match(policy, /policyTypes: \[Ingress\]/);
+  assert.doesNotMatch(policy, /^  egress:/m);
+  assert.equal(count(policy, /^    - from:$/gm), 2);
+  assert.equal(count(policy, /^        - port: 8200$/gm), 2);
+  assert.equal(count(policy, /^          protocol: TCP$/gm), 2);
+  assert.match(policy, /podSelector:\n    matchLabels:\n      app\.kubernetes\.io\/name: openbao-fabric\n      app\.kubernetes\.io\/component: secret-plane/);
+  assert.match(policy, /app\.kubernetes\.io\/component: secret-plane-bootstrap/);
+  assert.match(policy, /kubernetes\.io\/metadata\.name: external-secrets/);
+  assert.match(policy, /app\.kubernetes\.io\/name: external-secrets/);
+  assert.equal(wave(policy), "-4");
+  assert.equal(wave(pvc), "-4"); assert.equal(wave(patch), "-4"); assert.equal(wave(secretStore), "-3");
+  assert.ok(renderedPolicy); assert.ok(renderedPvc); assert.ok(renderedStatefulSet); assert.ok(renderedStore);
+  assert.equal(wave(renderedPolicy), "-4"); assert.equal(wave(renderedPvc), "-4"); assert.equal(wave(renderedStatefulSet), "-4"); assert.equal(wave(renderedStore), "-3");
+  assert.equal(count(renderedPolicy, /port: 8200/g), 2);
+  assert.equal(count(renderedPolicy, /protocol: TCP/g), 2);
+  assert.doesNotMatch(renderedPolicy, /^  egress:/m);
+  assert.equal(count(renderedStatefulSet, /claimName: openbao-fabric-audit/g), 1);
+  assert.equal(count(renderedStatefulSet, /mountPath: \/openbao\/audit/g), 1);
+  for (const forbidden of [/^  egress:/m, /prune:/, /selfHeal:/, /allowEmpty:/, /syncOptions:/, /retry:/, /argocd\.argoproj\.io\/hook/, new RegExp("kind: " + "Sec" + "ret"), new RegExp("kind: " + "J" + "ob")]) assert.doesNotMatch(policy, forbidden);
 });
-// END CERBERE_ESO_INGRESS_ORDER_GUARD
+// END CERBERE_PR100_ESO_FAIL_CLOSED_GUARD
