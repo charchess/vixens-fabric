@@ -86,6 +86,23 @@ test("audit storage aligns WFFC waves before its SecretStore", () => {
   assert.equal(configLines.includes('        file_path = "/openbao/audit/fabric-audit.log"'), true);
   assert.equal(configLines.includes('        log_raw = "false"'), true);
   assert.equal(configLines.includes('        hmac_accessor = "true"'), true);
+  const serverHclStart = configLines.indexOf("  server.hcl: |");
+  const serverHclLines = configLines.slice(serverHclStart + 1);
+  const auditStart = serverHclLines.indexOf('    audit "file" "fabric-audit" {');
+  const expectedAuditBlock = [
+    '    audit "file" "fabric-audit" {',
+    '      options {',
+    '        file_path = "/openbao/audit/fabric-audit.log"',
+    '        log_raw = "false"',
+    '        hmac_accessor = "true"',
+    '      }',
+    '    }',
+  ].join(String.fromCharCode(10));
+  assert.ok(serverHclStart >= 0);
+  assert.ok(auditStart >= 0);
+  assert.equal(serverHclLines.slice(auditStart, auditStart + 7).join(String.fromCharCode(10)), expectedAuditBlock);
+  assert.equal(serverHclLines.filter(line => line === '    audit "file" "fabric-audit" {').length, 1);
+  for (const marker of ["unsafe_" + "allow_api_audit_creation", "tls_" + "skip_verify", "fall" + "back", "/sys/" + "audit", "openbao-" + "infra"]) assert.equal(serverHclLines.join(String.fromCharCode(10)).includes(marker), false, `server.hcl drift: ${marker}`);
 
   assert.match(runbook, /Electra owns/);
   assert.match(runbook, /80%/);
