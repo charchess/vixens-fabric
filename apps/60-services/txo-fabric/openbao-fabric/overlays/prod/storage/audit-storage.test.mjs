@@ -154,10 +154,12 @@ test("audit storage aligns WFFC waves before its SecretStore", () => {
   ]);
   const repoRoot = fileURLToPath(new URL("../../../../../../../", import.meta.url));
   const diffNames = execFileSync("git", ["diff", "--name-only", cnpgBase], { cwd: repoRoot, encoding: "utf8" }).trim().split("\n").filter(Boolean).sort();
+  const configWaveKustomizationPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/kustomization.yaml";
+  const configWavePatchPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/storage/openbao-config-wave.yaml";
   const esoOrderPolicyPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/secret-plane/openbao-client-networkpolicy.yaml";
   const esoTokenRequestRolePath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/secret-plane/eso-tokenrequest-rbac.yaml";
   const esoTokenRequestKustomizationPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/secret-plane/kustomization.yaml";
-  assert.deepEqual(diffNames, [...cnpgPaths, cnpgTestPath, esoOrderPolicyPath, esoTokenRequestRolePath, esoTokenRequestKustomizationPath].sort());
+  assert.deepEqual(diffNames, [...cnpgPaths, cnpgTestPath, esoOrderPolicyPath, esoTokenRequestRolePath, esoTokenRequestKustomizationPath, configWaveKustomizationPath, configWavePatchPath].sort());
   const manifestDiff = execFileSync("git", ["diff", "--no-ext-diff", cnpgBase, "--", ...cnpgPaths], { cwd: repoRoot, encoding: "utf8" });
   assert.equal(count(manifestDiff, /^-.*postgresql-shared-recovery$/gm), 5);
   assert.equal(count(manifestDiff, /^\+.*postgresql-shared$/gm), 5);
@@ -203,9 +205,11 @@ test("PR100 ESO ingress ordering is base-bound and fail-closed", () => {
   const renderedStatefulSet = renderedDocument(rendered, "StatefulSet", "openbao-fabric");
   const renderedStore = renderedDocument(rendered, "SecretStore", "openbao-fabric-store");
   const diffNames = execFileSync("git", ["diff", "--name-only", pr100Base], { cwd: repoRoot, encoding: "utf8" }).trim().split("\n").filter(Boolean).sort();
+  const configWaveKustomizationPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/kustomization.yaml";
+  const configWavePatchPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/storage/openbao-config-wave.yaml";
   const tokenRequestRolePath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/secret-plane/eso-tokenrequest-rbac.yaml";
   const tokenRequestKustomizationPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/secret-plane/kustomization.yaml";
-  assert.deepEqual(diffNames, [policyPath, testPath, tokenRequestRolePath, tokenRequestKustomizationPath].sort());
+  assert.deepEqual(diffNames, [policyPath, testPath, tokenRequestRolePath, tokenRequestKustomizationPath, configWaveKustomizationPath, configWavePatchPath].sort());
   const waveBlock = '  annotations:\n    argocd.argoproj.io/sync-wave: "-4"\n';
   assert.equal(policy.split(waveBlock).length - 1, 1);
   const normalizedPolicy = policy.replace(waveBlock, "");
@@ -239,6 +243,8 @@ test("PR100 ESO ingress ordering is base-bound and fail-closed", () => {
 // BEGIN CERBERE_ESO_TOKENREQUEST_RBAC_GUARD
 test("ESO TokenRequest RBAC joins ESO, PVC and StatefulSet before SecretStore", () => {
   const base = "3c3605e3c70d135ec67f6bb623614afa00923af7";
+  const configWaveKustomizationPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/kustomization.yaml";
+  const configWavePatchPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/storage/openbao-config-wave.yaml";
   const rolePath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/secret-plane/eso-tokenrequest-rbac.yaml";
   const kustomizationPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/secret-plane/kustomization.yaml";
   const testPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/storage/audit-storage.test.mjs";
@@ -250,7 +256,7 @@ test("ESO TokenRequest RBAC joins ESO, PVC and StatefulSet before SecretStore", 
   const renderedRole = renderedDocument(rendered, "Role", "txo-fabric-eso-tokenrequest"); const renderedBinding = renderedDocument(rendered, "RoleBinding", "txo-fabric-eso-tokenrequest");
   const renderedPolicy = renderedDocument(rendered, "NetworkPolicy", "openbao-fabric-eso-clients"); const renderedPvc = renderedDocument(rendered, "PersistentVolumeClaim", "openbao-fabric-audit"); const renderedStatefulSet = renderedDocument(rendered, "StatefulSet", "openbao-fabric"); const renderedStore = renderedDocument(rendered, "SecretStore", "openbao-fabric-store");
   const changed = execFileSync("git", ["diff", "--name-only", base], { cwd: repoRoot, encoding: "utf8" }).trim().split("\n").filter(Boolean).sort();
-  assert.deepEqual(changed, [rolePath, kustomizationPath, testPath].sort());
+  assert.deepEqual(changed, [rolePath, kustomizationPath, testPath, configWaveKustomizationPath, configWavePatchPath].sort());
   assert.equal(role, `---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -292,3 +298,6 @@ subjects:
   for (const forbidden of [/\b(get|list|watch|update|patch|delete|deletecollection)\b/, /\["\*"\]/, /resources:.*secrets/, /ClusterRole/, /openbao-fabric-store/, /openbao-client-networkpolicy/]) assert.doesNotMatch(role, forbidden);
 });
 // END CERBERE_ESO_TOKENREQUEST_RBAC_GUARD
+// BEGIN MIRA_OPENBAO_CONFIG_WAVE_REAL
+test("OpenBao ConfigMap wave precedes secret plane", () => { const rendered=execFileSync("kustomize", ["build", fileURLToPath(new URL("../", import.meta.url))], {encoding:"utf8"}); const cm=renderedDocument(rendered,"ConfigMap","openbao-fabric-config"); const pvc=read("./audit-pvc.yaml"), sts=read("./audit-statefulset-volume.yaml"), eso=read("../secret-plane/eso-identity.yaml"), rbac=read("../secret-plane/eso-tokenrequest-rbac.yaml"), store=read("../secret-plane/secret-store.yaml"), config=read("../../../base/configmap.yaml"); assert.ok(cm); assert.equal(wave(cm),"-5"); for(const z of [pvc,sts,eso,rbac]) assert.equal(wave(z),"-4"); assert.equal(wave(store),"-3"); for(const q of ['audit "file" "fabric-audit"','/openbao/audit/fabric-audit.log','log_raw = "false"','hmac_accessor = "true"']) assert.ok(config.includes(q)); });
+// END MIRA_OPENBAO_CONFIG_WAVE_REAL

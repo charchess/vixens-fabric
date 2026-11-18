@@ -19,3 +19,9 @@ patches:
       kind: StatefulSet
       name: openbao-fabric
     path: storage/audit-statefulset-volume.yaml
+  - target:
+      version: v1
+      kind: ConfigMap
+      name: openbao-fabric-config
+      namespace: txo-fabric-system
+    path: storage/openbao-config-wave.yaml
