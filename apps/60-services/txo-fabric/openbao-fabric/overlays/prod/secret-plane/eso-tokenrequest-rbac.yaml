@@ -4,6 +4,8 @@ kind: Role
 metadata:
   name: txo-fabric-eso-tokenrequest
   namespace: txo-fabric-system
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
 rules:
   - apiGroups: [""]
     resources: ["serviceaccounts/token"]
@@ -15,6 +17,8 @@ kind: RoleBinding
 metadata:
   name: txo-fabric-eso-tokenrequest
   namespace: txo-fabric-system
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
