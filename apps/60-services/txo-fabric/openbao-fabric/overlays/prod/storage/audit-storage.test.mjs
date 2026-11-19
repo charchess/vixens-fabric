@@ -299,5 +299,20 @@ subjects:
 });
 // END CERBERE_ESO_TOKENREQUEST_RBAC_GUARD
 // BEGIN MIRA_OPENBAO_CONFIG_WAVE_REAL
-test("OpenBao ConfigMap wave precedes secret plane", () => { const rendered=execFileSync("kustomize", ["build", fileURLToPath(new URL("../", import.meta.url))], {encoding:"utf8"}); const cm=renderedDocument(rendered,"ConfigMap","openbao-fabric-config"); const pvc=read("./audit-pvc.yaml"), sts=read("./audit-statefulset-volume.yaml"), eso=read("../secret-plane/eso-identity.yaml"), rbac=read("../secret-plane/eso-tokenrequest-rbac.yaml"), store=read("../secret-plane/secret-store.yaml"), config=read("../../../base/configmap.yaml"); assert.ok(cm); assert.equal(wave(cm),"-5"); for(const z of [pvc,sts,eso,rbac]) assert.equal(wave(z),"-4"); assert.equal(wave(store),"-3"); for(const q of ['audit "file" "fabric-audit"','/openbao/audit/fabric-audit.log','log_raw = "false"','hmac_accessor = "true"']) assert.ok(config.includes(q)); });
+// Dedicated PR102 guard. It scans only the recovery manifest-diff surface.
+test("OpenBao ConfigMap recovery is bounded, rendered, and ordered", () => {
+  const recoveryBase = "fab5be83d7bbdb06baf5bb72f7c38d146ce1d224";
+  const repoRoot = fileURLToPath(new URL("../../../../../../../", import.meta.url));
+  const overlayPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/kustomization.yaml";
+  const patchPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/storage/openbao-config-wave.yaml";
+  const testPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/storage/audit-storage.test.mjs";
+  const changed = execFileSync("git", ["diff", "--name-only", recoveryBase], { cwd: repoRoot, encoding: "utf8" }).trim().split("\n").filter(Boolean).sort();
+  assert.deepEqual(changed, [overlayPath, patchPath, testPath].sort());
+  const patch = read("./openbao-config-wave.yaml");
+  const config = read("../../../base/configmap.yaml");
+  const rendered = execFileSync("kustomize", ["build", fileURLToPath(new URL("../", import.meta.url))], { encoding: "utf8" });
+  const renderedConfig = renderedDocument(rendered, "ConfigMap", "openbao-fabric-config");
+  assert.ok(renderedConfig); assert.equal(wave(patch), "-5"); assert.equal(wave(renderedConfig), "-5");
+  for (const term of ['audit "file" "fabric-audit"', "/openbao/audit/fabric-audit.log", 'log_raw = "false"', 'hmac_accessor = "true"']) { assert.ok(config.includes(term)); assert.ok(renderedConfig.includes(term)); }
+});
 // END MIRA_OPENBAO_CONFIG_WAVE_REAL
