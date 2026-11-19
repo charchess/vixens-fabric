@@ -270,7 +270,7 @@ func TestPostgreSQLClusterReplacementDeletesOnlyExactManagedOldResourcesBeforePr
 	oldDatabase.SetLabels(postgresqlLabels(tenant, profile, "database", "Retain"))
 	oldDatabase.Object["spec"] = map[string]interface{}{"cluster": map[string]interface{}{"name": "postgresql-shared"}, "name": names.Database}
 	newCluster := cnpgObject(cnpgClusterGVK, "databases-next", "postgresql-next")
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant, profile, oldRole, oldDatabase, newCluster).Build()
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(tenant).WithObjects(tenant, profile, oldRole, oldDatabase, newCluster).Build()
 	r := &TenantBundleReconciler{Client: c, Scheme: scheme}
 
 	result, err := r.reconcilePostgreSQL(ctx, tenant)
@@ -295,8 +295,15 @@ func TestPostgreSQLClusterReplacementDeletesOnlyExactManagedOldResourcesBeforePr
 	if err != nil {
 		t.Fatal(err)
 	}
+	if result.Ready || result.Reason != "ClusterReplacementOldAbsent" || result.Status == nil || result.Status.Phase != "OldAbsent" {
+		t.Fatalf("replacement must persist old absence before the separate credential phase, got %#v", result)
+	}
+	result, err = r.reconcilePostgreSQL(ctx, tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if result.Ready || result.Reason != "ClusterReplacementAwaitingCredentialPhase" || result.Status == nil || result.Status.Phase != "AwaitingCredentialPhase" {
-		t.Fatalf("replacement must stop after old absence for the separate credential phase, got %#v", result)
+		t.Fatalf("replacement must then stop at the separate credential phase, got %#v", result)
 	}
 	newRole := cnpgObject(cnpgDatabaseRoleGVK, "databases-next", names.RoleResource)
 	if err := c.Get(ctx, client.ObjectKeyFromObject(newRole), newRole); !apierrors.IsNotFound(err) {
@@ -388,6 +395,131 @@ func TestPostgreSQLClusterReplacementRejectsEveryContractMismatchWithoutDeletion
 			}
 		})
 	}
+}
+
+func TestPostgreSQLClusterReplacementRequiresExactlyOneOldRoleAndDatabaseBeforeAnyMutation(t *testing.T) {
+	cases := []struct {
+		name        string
+		oldRole     bool
+		oldDatabase bool
+		duplicate   bool
+	}{
+		{name: "role-only", oldRole: true},
+		{name: "database-only", oldDatabase: true},
+		{name: "duplicate-role", oldRole: true, oldDatabase: true, duplicate: true},
+		{name: "duplicate-database", oldRole: true, oldDatabase: true, duplicate: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			scheme := postgresqlTestScheme(t)
+			tenant, profile, newCluster, oldRole, oldDatabase := postgresqlReplacementFixture(t)
+			objects := []client.Object{tenant, profile, newCluster}
+			if tc.oldRole {
+				objects = append(objects, oldRole)
+			}
+			if tc.oldDatabase {
+				objects = append(objects, oldDatabase)
+			}
+			if tc.duplicate {
+				if tc.name == "duplicate-role" {
+					duplicate := oldRole.DeepCopy()
+					duplicate.SetName(oldRole.GetName() + "-duplicate")
+					objects = append(objects, duplicate)
+				} else {
+					duplicate := oldDatabase.DeepCopy()
+					duplicate.SetName(oldDatabase.GetName() + "-duplicate")
+					objects = append(objects, duplicate)
+				}
+			}
+			base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+			spy := &postgresqlOperationSpy{Client: base}
+			r := &TenantBundleReconciler{Client: spy, Scheme: scheme}
+
+			result, err := r.reconcilePostgreSQL(ctx, tenant)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Reason != "ClusterReplacementIneligible" || result.Status == nil || result.Status.Phase != "Blocked" {
+				t.Fatalf("expected fail-closed cardinality block, got %#v", result)
+			}
+			if spy.deletes != 0 || spy.creates != 0 || spy.updates != 0 {
+				t.Fatalf("invalid old cardinality must not mutate resources; delete=%d create=%d update=%d", spy.deletes, spy.creates, spy.updates)
+			}
+		})
+	}
+}
+
+func TestPostgreSQLClusterReplacementPersistsMonotoneConsumptionAndRefusesReplay(t *testing.T) {
+	ctx := context.Background()
+	scheme := postgresqlTestScheme(t)
+	tenant, profile, newCluster, oldRole, oldDatabase := postgresqlReplacementFixture(t)
+	base := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(tenant).WithObjects(tenant, profile, newCluster, oldRole, oldDatabase).Build()
+	spy := &postgresqlOperationSpy{Client: base}
+	r := &TenantBundleReconciler{Client: spy, Scheme: scheme}
+
+	result, err := r.reconcilePostgreSQL(ctx, tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Reason != "ClusterReplacementDeleting" || tenant.Status.Persistence.PostgreSQLReplacement == nil || tenant.Status.Persistence.PostgreSQLReplacement.Phase != fabricv1alpha1.PostgreSQLClusterReplacementDeletingOld {
+		t.Fatalf("expected durable deleting status, got result=%#v status=%#v", result, tenant.Status.Persistence.PostgreSQLReplacement)
+	}
+	if spy.deletes != 2 || spy.creates != 0 || spy.updates != 0 {
+		t.Fatalf("expected only exact old deletes, got delete=%d create=%d update=%d", spy.deletes, spy.creates, spy.updates)
+	}
+
+	result, err = r.reconcilePostgreSQL(ctx, tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := tenant.Status.Persistence.PostgreSQLReplacement
+	if result.Reason != "ClusterReplacementOldAbsent" || status == nil || status.Phase != fabricv1alpha1.PostgreSQLClusterReplacementOldAbsent || status.ConsumedID != tenant.Spec.Persistence.PostgreSQL.Replacement.ID || status.ContractFingerprint == "" {
+		t.Fatalf("expected persisted old-absent consumption before credential gate, got result=%#v status=%#v", result, status)
+	}
+
+	result, err = r.reconcilePostgreSQL(ctx, tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Reason != "ClusterReplacementAwaitingCredentialPhase" || spy.deletes != 2 || spy.creates != 0 || spy.updates != 0 {
+		t.Fatalf("consumed replacement must refuse replay without mutations, got result=%#v delete=%d create=%d update=%d", result, spy.deletes, spy.creates, spy.updates)
+	}
+}
+
+type postgresqlOperationSpy struct {
+	client.Client
+	deletes, creates, updates int
+}
+
+func (c *postgresqlOperationSpy) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
+	c.deletes++
+	return c.Client.Delete(ctx, obj, opts...)
+}
+func (c *postgresqlOperationSpy) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
+	c.creates++
+	return c.Client.Create(ctx, obj, opts...)
+}
+func (c *postgresqlOperationSpy) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
+	c.updates++
+	return c.Client.Update(ctx, obj, opts...)
+}
+
+func postgresqlReplacementFixture(t *testing.T) (*fabricv1alpha1.TenantBundle, *fabricv1alpha1.PostgreSQLProfile, *unstructured.Unstructured, *unstructured.Unstructured, *unstructured.Unstructured) {
+	t.Helper()
+	tenant := postgresqlTestTenant()
+	profile := postgresqlTestProfile()
+	profile.Spec.Shared.ClusterRef = fabricv1alpha1.PostgreSQLClusterReference{Name: "postgresql-next", Namespace: "databases-next"}
+	tenant.Spec.Persistence.PostgreSQL.Replacement = &fabricv1alpha1.PostgreSQLClusterReplacementSpec{ContractVersion: "v1", ID: "replace-20261119", TenantID: tenant.Spec.TenantID, TenantName: tenant.Name, ProfileRef: profile.Name, ExpectedOldCluster: fabricv1alpha1.PostgreSQLClusterReference{Name: "postgresql-shared", Namespace: "databases"}}
+	names := resolvePostgreSQLNames(tenant, profile)
+	oldRole := cnpgObject(cnpgDatabaseRoleGVK, "databases", names.RoleResource)
+	oldRole.SetLabels(postgresqlLabels(tenant, profile, "role", "Retain"))
+	oldRole.Object["spec"] = map[string]interface{}{"cluster": map[string]interface{}{"name": "postgresql-shared"}, "name": names.Role}
+	oldDatabase := cnpgObject(cnpgDatabaseGVK, "databases", names.DatabaseResource)
+	oldDatabase.SetLabels(postgresqlLabels(tenant, profile, "database", "Retain"))
+	oldDatabase.Object["spec"] = map[string]interface{}{"cluster": map[string]interface{}{"name": "postgresql-shared"}, "name": names.Database}
+	newCluster := cnpgObject(cnpgClusterGVK, "databases-next", "postgresql-next")
+	return tenant, profile, newCluster, oldRole, oldDatabase
 }
 
 func postgresqlTestScheme(t *testing.T) *runtime.Scheme {

@@ -168,80 +168,79 @@ func (r *TenantBundleReconciler) reconcilePostgreSQL(ctx context.Context, bundle
 }
 
 func (r *TenantBundleReconciler) reconcilePostgreSQLClusterReplacement(ctx context.Context, bundle *fabricv1alpha1.TenantBundle, profile *fabricv1alpha1.PostgreSQLProfile, names postgresqlNames) (*postgresqlResult, error) {
-	selector := client.MatchingLabels{
-		LabelManaged:    "true",
-		LabelTenantID:   bundle.Spec.TenantID,
-		LabelTenantName: bundle.Name,
-	}
-	old := make([]*unstructured.Unstructured, 0, 2)
-	current := 0
-	for _, resource := range []struct {
-		gvk      schema.GroupVersionKind
-		kind     string
-		name     string
-		postgres string
-	}{
-		{cnpgDatabaseGVK, "database", names.DatabaseResource, names.Database},
-		{cnpgDatabaseRoleGVK, "role", names.RoleResource, names.Role},
-	} {
-		objects := cnpgList(resource.gvk)
-		if err := r.List(ctx, objects, selector); err != nil {
-			return nil, err
-		}
-		for i := range objects.Items {
-			object := &objects.Items[i]
-			if object.GetLabels()[labelPostgreSQLResource] != resource.kind {
-				continue
-			}
-			if object.GetName() == resource.name && object.GetNamespace() == profile.Spec.Shared.ClusterRef.Namespace && immutableCNPGIdentityMatches(object, profile.Spec.Shared.ClusterRef.Name, resource.postgres) {
-				current++
-				continue
-			}
-			old = append(old, object.DeepCopy())
-		}
-	}
-	if len(old) == 0 {
+	replacement := bundle.Spec.Persistence.PostgreSQL.Replacement
+	status := bundle.Status.Persistence.PostgreSQLReplacement
+	if replacement == nil {
 		return nil, nil
 	}
-	if current > 0 {
-		blocked := postgresqlBlocked("ClusterReplacementConflict", "canonical CloudNativePG resources already exist on the target cluster while old resources remain; refusing to delete either side", 0)
-		return &blocked, nil
-	}
-
-	replacement := bundle.Spec.Persistence.PostgreSQL.Replacement
-	if replacement == nil {
-		blocked := postgresqlBlocked("ClusterReplacementRequired", "Fabric-managed CloudNativePG resources have an immutable cluster identity incompatible with the selected profile; explicit v1 replacement is required", 0)
-		return &blocked, nil
-	}
-	if replacement.ContractVersion != "v1" || replacement.ID == "" || replacement.TenantID != bundle.Spec.TenantID || replacement.TenantName != bundle.Name || replacement.ProfileRef != profile.Name || replacement.ExpectedOldCluster.Name == "" || replacement.ExpectedOldCluster.Namespace == "" {
-		blocked := postgresqlBlocked("ClusterReplacementIneligible", "replacement contract must be v1 and exactly bind replacement ID, tenant ID/name, profile, and expected old cluster", 0)
-		return &blocked, nil
-	}
-	if replacement.ExpectedOldCluster.Name == profile.Spec.Shared.ClusterRef.Name && replacement.ExpectedOldCluster.Namespace == profile.Spec.Shared.ClusterRef.Namespace {
-		blocked := postgresqlBlocked("ClusterReplacementIneligible", "replacement expected old cluster must differ from the selected profile cluster", 0)
-		return &blocked, nil
-	}
-
-	for _, object := range old {
-		resourceKind := object.GetLabels()[labelPostgreSQLResource]
-		expectedName, expectedPostgresName := names.DatabaseResource, names.Database
-		if resourceKind == "role" {
-			expectedName, expectedPostgresName = names.RoleResource, names.Role
-		}
-		if (resourceKind != "database" && resourceKind != "role") || object.GetName() != expectedName || object.GetNamespace() != replacement.ExpectedOldCluster.Namespace || !postgresqlOwnedBy(object, bundle) || object.GetLabels()[labelPostgreSQLProfile] != profile.Name || !immutableCNPGIdentityMatches(object, replacement.ExpectedOldCluster.Name, expectedPostgresName) {
-			blocked := postgresqlBlocked("ClusterReplacementIneligible", "replacement contract does not exactly match every managed old CloudNativePG resource; refusing deletion", 0)
+	fingerprint := postgresqlReplacementFingerprint(replacement, names)
+	if status != nil {
+		if status.ReplacementID != replacement.ID || status.ContractFingerprint != fingerprint {
+			blocked := postgresqlBlocked("ClusterReplacementIneligible", "replacement contract diverges from the immutable validated transaction", 0)
 			return &blocked, nil
 		}
-	}
-	for _, object := range old {
-		if object.GetDeletionTimestamp() == nil {
-			if err := r.Delete(ctx, object); err != nil && !apierrors.IsNotFound(err) {
-				return nil, err
+		if status.ConsumedID != "" {
+			if status.ConsumedID != replacement.ID {
+				blocked := postgresqlBlocked("ClusterReplacementIneligible", "a different replacement ID is already consumed", 0)
+				return &blocked, nil
 			}
+			if status.Phase == fabricv1alpha1.PostgreSQLClusterReplacementOldAbsent {
+				status.Phase = fabricv1alpha1.PostgreSQLClusterReplacementAwaitingCredentialPhase
+			}
+			awaiting := postgresqlPending("ClusterReplacementAwaitingCredentialPhase", "replacement transaction is consumed; credentials and canonical resources require a separate reviewed phase", names, 0)
+			awaiting.Status.Phase = "AwaitingCredentialPhase"
+			return &awaiting, nil
 		}
 	}
-	pending := postgresqlPending("ClusterReplacementDeleting", fmt.Sprintf("replacement %q is removing exact Fabric-managed CloudNativePG resources from %s/%s; waiting for their absence before provisioning the canonical resources", replacement.ID, replacement.ExpectedOldCluster.Namespace, replacement.ExpectedOldCluster.Name), names, 2*time.Second)
+	if replacement.ContractVersion != "v1" || replacement.ID == "" || replacement.TenantID != bundle.Spec.TenantID || replacement.TenantName != bundle.Name || replacement.ProfileRef != profile.Name || replacement.ExpectedOldCluster.Name == "" || replacement.ExpectedOldCluster.Namespace == "" || (replacement.ExpectedOldCluster.Name == profile.Spec.Shared.ClusterRef.Name && replacement.ExpectedOldCluster.Namespace == profile.Spec.Shared.ClusterRef.Namespace) {
+		blocked := postgresqlBlocked("ClusterReplacementIneligible", "replacement contract must exactly bind a distinct old cluster to this tenant and profile", 0)
+		return &blocked, nil
+	}
+	selector := client.MatchingLabels{LabelManaged: "true", LabelTenantID: bundle.Spec.TenantID, LabelTenantName: bundle.Name}
+	roleList, databaseList := cnpgList(cnpgDatabaseRoleGVK), cnpgList(cnpgDatabaseGVK)
+	if err := r.List(ctx, roleList, selector); err != nil {
+		return nil, err
+	}
+	if err := r.List(ctx, databaseList, selector); err != nil {
+		return nil, err
+	}
+	if status != nil && status.Phase == fabricv1alpha1.PostgreSQLClusterReplacementDeletingOld && len(roleList.Items) == 0 && len(databaseList.Items) == 0 {
+		status.Phase = fabricv1alpha1.PostgreSQLClusterReplacementOldAbsent
+		status.ConsumedID = replacement.ID
+		if err := r.Status().Update(ctx, bundle); err != nil {
+			return nil, err
+		}
+		oldAbsent := postgresqlPending("ClusterReplacementOldAbsent", "the exact old pair is absent and the replacement ID is consumed", names, 0)
+		oldAbsent.Status.Phase = "OldAbsent"
+		return &oldAbsent, nil
+	}
+	if len(roleList.Items) != 1 || len(databaseList.Items) != 1 {
+		blocked := postgresqlBlocked("ClusterReplacementIneligible", "replacement requires exactly one managed old DatabaseRole and one managed old Database", 0)
+		return &blocked, nil
+	}
+	role, database := &roleList.Items[0], &databaseList.Items[0]
+	if role.GetLabels()[labelPostgreSQLResource] != "role" || database.GetLabels()[labelPostgreSQLResource] != "database" || role.GetName() != names.RoleResource || database.GetName() != names.DatabaseResource || role.GetNamespace() != replacement.ExpectedOldCluster.Namespace || database.GetNamespace() != replacement.ExpectedOldCluster.Namespace || !postgresqlOwnedBy(role, bundle) || !postgresqlOwnedBy(database, bundle) || role.GetLabels()[labelPostgreSQLProfile] != profile.Name || database.GetLabels()[labelPostgreSQLProfile] != profile.Name || !immutableCNPGIdentityMatches(role, replacement.ExpectedOldCluster.Name, names.Role) || !immutableCNPGIdentityMatches(database, replacement.ExpectedOldCluster.Name, names.Database) || role.GetDeletionTimestamp() != nil || database.GetDeletionTimestamp() != nil || len(role.GetFinalizers()) != 0 || len(database.GetFinalizers()) != 0 {
+		blocked := postgresqlBlocked("ClusterReplacementIneligible", "old CNPG pair is incomplete or ambiguous; refusing destructive replacement", 0)
+		return &blocked, nil
+	}
+	status = &fabricv1alpha1.PostgreSQLClusterReplacementStatus{Phase: fabricv1alpha1.PostgreSQLClusterReplacementDeletingOld, ReplacementID: replacement.ID, ContractFingerprint: fingerprint}
+	bundle.Status.Persistence.PostgreSQLReplacement = status
+	if err := r.Status().Update(ctx, bundle); err != nil {
+		return nil, err
+	}
+	for _, object := range []client.Object{role, database} {
+		if err := r.Delete(ctx, object); err != nil && !apierrors.IsNotFound(err) {
+			return nil, err
+		}
+	}
+	pending := postgresqlPending("ClusterReplacementDeleting", fmt.Sprintf("replacement %q is deleting the exact validated old pair", replacement.ID), names, 2*time.Second)
 	return &pending, nil
+}
+
+func postgresqlReplacementFingerprint(replacement *fabricv1alpha1.PostgreSQLClusterReplacementSpec, names postgresqlNames) string {
+	material := strings.Join([]string{replacement.ContractVersion, replacement.ID, replacement.TenantID, replacement.TenantName, replacement.ProfileRef, replacement.ExpectedOldCluster.Namespace, replacement.ExpectedOldCluster.Name, names.RoleResource, names.Role, names.DatabaseResource, names.Database}, "\x00")
+	sum := sha256.Sum256([]byte(material))
+	return hex.EncodeToString(sum[:])
 }
 
 func (r *TenantBundleReconciler) cleanupPostgreSQL(ctx context.Context, bundle *fabricv1alpha1.TenantBundle) (bool, error) {
