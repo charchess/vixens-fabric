@@ -150,7 +150,10 @@ func (r *TenantBundleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	bundle.Status.ObservedGeneration = bundle.Generation
 	bundle.Status.Namespace = namespaceName
-	bundle.Status.Persistence = fabricv1alpha1.TenantPersistenceStatus{}
+	// Replacement status is a controller-owned destructive-operation ledger and
+	// must survive ordinary status recomputation until its terminal handoff.
+	replacementStatus := bundle.Status.Persistence.PostgreSQLReplacement
+	bundle.Status.Persistence = fabricv1alpha1.TenantPersistenceStatus{PostgreSQLReplacement: replacementStatus}
 	bundle.Status.Memory = fabricv1alpha1.TenantMemoryStatus{}
 	bundle.Status.AIGateway = nil
 	bundle.Status.AICredentialBroker = nil

@@ -105,6 +105,18 @@ func (r *TenantBundleReconciler) reconcilePostgreSQL(ctx context.Context, bundle
 	}
 
 	names := resolvePostgreSQLNames(bundle, &profile)
+	replacement, err := r.reconcilePostgreSQLClusterReplacement(ctx, bundle, &profile, names)
+	if err != nil {
+		return postgresqlResult{}, err
+	}
+	if replacement != nil {
+		return *replacement, nil
+	}
+	if request.Replacement != nil {
+		awaiting := postgresqlPending("ClusterReplacementAwaitingCredentialPhase", "old CloudNativePG resources are absent; replacement stops before credential or canonical-resource provisioning until the separate credential phase is authorized", names, 0)
+		awaiting.Status.Phase = "AwaitingCredentialPhase"
+		return awaiting, nil
+	}
 	secret, blocked, err := r.ensurePostgreSQLSecret(ctx, bundle, &profile, names)
 	if err != nil {
 		return postgresqlResult{}, err
@@ -153,6 +165,82 @@ func (r *TenantBundleReconciler) reconcilePostgreSQL(ctx context.Context, bundle
 		Reason:  "Reconciled",
 		Message: fmt.Sprintf("tenant PostgreSQL Database and DatabaseRole are reconciled; credentials are stored in Secret %s", names.Secret),
 	}, nil
+}
+
+func (r *TenantBundleReconciler) reconcilePostgreSQLClusterReplacement(ctx context.Context, bundle *fabricv1alpha1.TenantBundle, profile *fabricv1alpha1.PostgreSQLProfile, names postgresqlNames) (*postgresqlResult, error) {
+	replacement := bundle.Spec.Persistence.PostgreSQL.Replacement
+	status := bundle.Status.Persistence.PostgreSQLReplacement
+	if replacement == nil {
+		return nil, nil
+	}
+	fingerprint := postgresqlReplacementFingerprint(replacement, names)
+	if status != nil {
+		if status.ReplacementID != replacement.ID || status.ContractFingerprint != fingerprint {
+			blocked := postgresqlBlocked("ClusterReplacementIneligible", "replacement contract diverges from the immutable validated transaction", 0)
+			return &blocked, nil
+		}
+		if status.ConsumedID != "" {
+			if status.ConsumedID != replacement.ID {
+				blocked := postgresqlBlocked("ClusterReplacementIneligible", "a different replacement ID is already consumed", 0)
+				return &blocked, nil
+			}
+			if status.Phase == fabricv1alpha1.PostgreSQLClusterReplacementOldAbsent {
+				status.Phase = fabricv1alpha1.PostgreSQLClusterReplacementAwaitingCredentialPhase
+			}
+			awaiting := postgresqlPending("ClusterReplacementAwaitingCredentialPhase", "replacement transaction is consumed; credentials and canonical resources require a separate reviewed phase", names, 0)
+			awaiting.Status.Phase = "AwaitingCredentialPhase"
+			return &awaiting, nil
+		}
+	}
+	if replacement.ContractVersion != "v1" || replacement.ID == "" || replacement.TenantID != bundle.Spec.TenantID || replacement.TenantName != bundle.Name || replacement.ProfileRef != profile.Name || replacement.ExpectedOldCluster.Name == "" || replacement.ExpectedOldCluster.Namespace == "" || (replacement.ExpectedOldCluster.Name == profile.Spec.Shared.ClusterRef.Name && replacement.ExpectedOldCluster.Namespace == profile.Spec.Shared.ClusterRef.Namespace) {
+		blocked := postgresqlBlocked("ClusterReplacementIneligible", "replacement contract must exactly bind a distinct old cluster to this tenant and profile", 0)
+		return &blocked, nil
+	}
+	selector := client.MatchingLabels{LabelManaged: "true", LabelTenantID: bundle.Spec.TenantID, LabelTenantName: bundle.Name}
+	roleList, databaseList := cnpgList(cnpgDatabaseRoleGVK), cnpgList(cnpgDatabaseGVK)
+	if err := r.List(ctx, roleList, selector); err != nil {
+		return nil, err
+	}
+	if err := r.List(ctx, databaseList, selector); err != nil {
+		return nil, err
+	}
+	if status != nil && status.Phase == fabricv1alpha1.PostgreSQLClusterReplacementDeletingOld && len(roleList.Items) == 0 && len(databaseList.Items) == 0 {
+		status.Phase = fabricv1alpha1.PostgreSQLClusterReplacementOldAbsent
+		status.ConsumedID = replacement.ID
+		if err := r.Status().Update(ctx, bundle); err != nil {
+			return nil, err
+		}
+		oldAbsent := postgresqlPending("ClusterReplacementOldAbsent", "the exact old pair is absent and the replacement ID is consumed", names, 0)
+		oldAbsent.Status.Phase = "OldAbsent"
+		return &oldAbsent, nil
+	}
+	if len(roleList.Items) != 1 || len(databaseList.Items) != 1 {
+		blocked := postgresqlBlocked("ClusterReplacementIneligible", "replacement requires exactly one managed old DatabaseRole and one managed old Database", 0)
+		return &blocked, nil
+	}
+	role, database := &roleList.Items[0], &databaseList.Items[0]
+	if role.GetLabels()[labelPostgreSQLResource] != "role" || database.GetLabels()[labelPostgreSQLResource] != "database" || role.GetName() != names.RoleResource || database.GetName() != names.DatabaseResource || role.GetNamespace() != replacement.ExpectedOldCluster.Namespace || database.GetNamespace() != replacement.ExpectedOldCluster.Namespace || !postgresqlOwnedBy(role, bundle) || !postgresqlOwnedBy(database, bundle) || role.GetLabels()[labelPostgreSQLProfile] != profile.Name || database.GetLabels()[labelPostgreSQLProfile] != profile.Name || !immutableCNPGIdentityMatches(role, replacement.ExpectedOldCluster.Name, names.Role) || !immutableCNPGIdentityMatches(database, replacement.ExpectedOldCluster.Name, names.Database) || role.GetDeletionTimestamp() != nil || database.GetDeletionTimestamp() != nil || len(role.GetFinalizers()) != 0 || len(database.GetFinalizers()) != 0 {
+		blocked := postgresqlBlocked("ClusterReplacementIneligible", "old CNPG pair is incomplete or ambiguous; refusing destructive replacement", 0)
+		return &blocked, nil
+	}
+	status = &fabricv1alpha1.PostgreSQLClusterReplacementStatus{Phase: fabricv1alpha1.PostgreSQLClusterReplacementDeletingOld, ReplacementID: replacement.ID, ContractFingerprint: fingerprint}
+	bundle.Status.Persistence.PostgreSQLReplacement = status
+	if err := r.Status().Update(ctx, bundle); err != nil {
+		return nil, err
+	}
+	for _, object := range []client.Object{role, database} {
+		if err := r.Delete(ctx, object); err != nil && !apierrors.IsNotFound(err) {
+			return nil, err
+		}
+	}
+	pending := postgresqlPending("ClusterReplacementDeleting", fmt.Sprintf("replacement %q is deleting the exact validated old pair", replacement.ID), names, 2*time.Second)
+	return &pending, nil
+}
+
+func postgresqlReplacementFingerprint(replacement *fabricv1alpha1.PostgreSQLClusterReplacementSpec, names postgresqlNames) string {
+	material := strings.Join([]string{replacement.ContractVersion, replacement.ID, replacement.TenantID, replacement.TenantName, replacement.ProfileRef, replacement.ExpectedOldCluster.Namespace, replacement.ExpectedOldCluster.Name, names.RoleResource, names.Role, names.DatabaseResource, names.Database}, "\x00")
+	sum := sha256.Sum256([]byte(material))
+	return hex.EncodeToString(sum[:])
 }
 
 func (r *TenantBundleReconciler) cleanupPostgreSQL(ctx context.Context, bundle *fabricv1alpha1.TenantBundle) (bool, error) {
@@ -226,9 +314,9 @@ func (r *TenantBundleReconciler) ensurePostgreSQLSecret(ctx context.Context, bun
 			Data: map[string][]byte{
 				corev1.BasicAuthUsernameKey: []byte(names.Role),
 				corev1.BasicAuthPasswordKey: []byte(password),
-				"host":                    []byte(profile.Spec.Shared.ClusterRef.Name + "-rw." + namespace + ".svc"),
-				"port":                    []byte("5432"),
-				"dbname":                  []byte(names.Database),
+				"host":                      []byte(profile.Spec.Shared.ClusterRef.Name + "-rw." + namespace + ".svc"),
+				"port":                      []byte("5432"),
+				"dbname":                    []byte(names.Database),
 			},
 		}
 		secret.Labels[cnpgReloadLabel] = "true"
@@ -257,9 +345,9 @@ func (r *TenantBundleReconciler) ensurePostgreSQLSecret(ctx context.Context, bun
 	desiredData := map[string][]byte{
 		corev1.BasicAuthUsernameKey: secret.Data[corev1.BasicAuthUsernameKey],
 		corev1.BasicAuthPasswordKey: secret.Data[corev1.BasicAuthPasswordKey],
-		"host":                    []byte(profile.Spec.Shared.ClusterRef.Name + "-rw." + namespace + ".svc"),
-		"port":                    []byte("5432"),
-		"dbname":                  []byte(names.Database),
+		"host":                      []byte(profile.Spec.Shared.ClusterRef.Name + "-rw." + namespace + ".svc"),
+		"port":                      []byte("5432"),
+		"dbname":                    []byte(names.Database),
 	}
 	if !reflect.DeepEqual(secret.Labels, mergedLabels) || !reflect.DeepEqual(secret.Data, desiredData) {
 		secret.Labels = mergedLabels
