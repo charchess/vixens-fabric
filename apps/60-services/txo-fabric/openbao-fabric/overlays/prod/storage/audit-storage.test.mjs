@@ -316,3 +316,78 @@ test("OpenBao ConfigMap recovery is bounded, rendered, and ordered", () => {
   for (const term of ['audit "file" "fabric-audit"', "/openbao/audit/fabric-audit.log", 'log_raw = "false"', 'hmac_accessor = "true"']) { assert.ok(config.includes(term)); assert.ok(renderedConfig.includes(term)); }
 });
 // END MIRA_OPENBAO_CONFIG_WAVE_REAL
+
+// BEGIN CERBERE_PR102_SECOND_TEST_ONLY_GUARD
+test("PR102 second amendment keeps the ConfigMap recovery chain fail-closed", () => {
+  const laneBase = "2f9775f110e1776b1b950e6c0283274ff68dc0f8";
+  const recoveryBase = "fab5be83d7bbdb06baf5bb72f7c38d146ce1d224";
+  const repoRoot = fileURLToPath(new URL("../../../../../../../", import.meta.url));
+  const overlayPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/kustomization.yaml";
+  const configPatchPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/storage/openbao-config-wave.yaml";
+  const testPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/storage/audit-storage.test.mjs";
+  const role = read("../secret-plane/eso-tokenrequest-rbac.yaml");
+  const policy = read("../secret-plane/openbao-client-networkpolicy.yaml");
+  const pvc = read("./audit-pvc.yaml");
+  const statefulSetPatch = read("./audit-statefulset-volume.yaml");
+  const store = read("../secret-plane/secret-store.yaml");
+  const configPatch = read("./openbao-config-wave.yaml");
+  const overlay = read("../kustomization.yaml");
+  const config = read("../../../base/configmap.yaml");
+  const changed = execFileSync("git", ["diff", "--name-only", laneBase], { cwd: repoRoot, encoding: "utf8" }).trim().split("\n").filter(Boolean).sort();
+  assert.deepEqual(changed, [testPath]);
+  const recoveryNames = execFileSync("git", ["diff", "--name-only", recoveryBase, laneBase], { cwd: repoRoot, encoding: "utf8" }).trim().split("\n").filter(Boolean).sort();
+  assert.deepEqual(recoveryNames, [overlayPath, configPatchPath, testPath].sort());
+  const patchEntry = ["  - target:", "      version: v1", "      kind: ConfigMap", "      name: openbao-fabric-config", "      namespace: txo-fabric-system", "    path: storage/openbao-config-wave.yaml", ""].join("\n");
+  const baseOverlay = execFileSync("git", ["show", `${recoveryBase}:${overlayPath}`], { cwd: repoRoot, encoding: "utf8" });
+  assert.equal(overlay.replace(patchEntry, ""), baseOverlay);
+  assert.equal(configPatch, ["apiVersion: v1", "kind: ConfigMap", "metadata:", "  name: openbao-fabric-config", "  namespace: txo-fabric-system", "  annotations:", "    argocd.argoproj.io/sync-wave: \"-5\"", ""].join("\n"));
+  const rendered = execFileSync("kustomize", ["build", fileURLToPath(new URL("../", import.meta.url))], { encoding: "utf8" });
+  const docs = rendered.split(/^---\s*$/m);
+  const one = (kind, name) => {
+    const matches = docs.filter(document => {
+      if (!new RegExp(`^kind: ${kind}$`, "m").test(document)) return false;
+      const metadata = document.match(/^metadata:\n((?:  .+\n?)*)/m)?.[1] ?? "";
+      return metadata.includes(`  name: ${name}\n`);
+    });
+    assert.equal(matches.length, 1, `expected one rendered ${kind}/${name}`);
+    return matches[0];
+  };
+  const renderedConfig = one("ConfigMap", "openbao-fabric-config");
+  const renderedRole = one("Role", "txo-fabric-eso-tokenrequest");
+  const renderedBinding = one("RoleBinding", "txo-fabric-eso-tokenrequest");
+  const renderedPolicy = one("NetworkPolicy", "openbao-fabric-eso-clients");
+  const renderedPvc = one("PersistentVolumeClaim", "openbao-fabric-audit");
+  const renderedStatefulSet = one("StatefulSet", "openbao-fabric");
+  const renderedStore = one("SecretStore", "openbao-fabric-store");
+  assert.equal(wave(configPatch), "-5");
+  assert.equal(wave(renderedConfig), "-5");
+  for (const source of [role, policy, pvc, statefulSetPatch]) assert.equal(wave(source), "-4");
+  for (const document of [renderedRole, renderedBinding, renderedPolicy, renderedPvc, renderedStatefulSet]) assert.equal(wave(document), "-4");
+  assert.equal(wave(store), "-3");
+  assert.equal(wave(renderedStore), "-3");
+  assert.ok(-5 < -4 && -4 < -3);
+  const extractServerHcl = document => {
+    const lines = document.split("\n"); const start = lines.indexOf("  server.hcl: |"); assert.ok(start >= 0);
+    const output = [];
+    for (const line of lines.slice(start + 1)) { if (line === "") { output.push(line); continue; } if (!line.startsWith("    ")) break; output.push(line.slice(4)); }
+    return output;
+  };
+  const auditBlock = lines => {
+    const start = lines.indexOf('audit "file" "fabric-audit" {'); assert.ok(start >= 0);
+    const output = []; let depth = 0;
+    for (const line of lines.slice(start)) { const token = line.trim(); if (!token) continue; output.push(token); depth += (token.match(/\{/g) ?? []).length - (token.match(/\}/g) ?? []).length; if (depth === 0) break; }
+    return output;
+  };
+  const nonAuditHash = lines => {
+    const output = []; let depth = 0;
+    for (const line of lines) { if (line === 'audit "file" "fabric-audit" {') { depth = 1; continue; } if (depth) { depth += (line.match(/\{/g) ?? []).length - (line.match(/\}/g) ?? []).length; continue; } output.push(line); }
+    return createHash("sha256").update(output.filter(line => line !== "").join("\n") + "\n").digest("hex");
+  };
+  const expectedHash = "5806a472b2651892d69d1038e3c8bfc72920c0d98f395cdc00db7da051124de9";
+  const expectedStanza = ['audit "file" "fabric-audit" {', "options {", 'file_path = "/openbao/audit/fabric-audit.log"', 'log_raw = "false"', 'hmac_accessor = "true"', "}", "}"];
+  const sourceLines = extractServerHcl(config); const renderedLines = extractServerHcl(renderedConfig);
+  for (const lines of [sourceLines, renderedLines]) { assert.equal(lines.filter(line => line === 'audit "file" "fabric-audit" {').length, 1); assert.equal(nonAuditHash(lines), expectedHash); assert.deepEqual(auditBlock(lines), expectedStanza); }
+  const manifestDiff = execFileSync("git", ["diff", "--no-ext-diff", recoveryBase, laneBase, "--", overlayPath, configPatchPath], { cwd: repoRoot, encoding: "utf8" });
+  for (const marker of ["kind: " + "Sec" + "ret", "string" + "Data:", "binary" + "Data:", "data:\n  ", "/sys/" + "audit", "Cluster" + "SecretStore", "openbao-" + "infra", "kind: " + "Job", "kind: " + "Role", "kind: " + "RoleBinding"]) assert.equal(manifestDiff.includes(marker), false, `forbidden manifest marker: ${marker}`);
+});
+// END CERBERE_PR102_SECOND_TEST_ONLY_GUARD
