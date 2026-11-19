@@ -62,8 +62,8 @@ test("private BFF network, TLS ingress and gate contracts match operator #4037 e
   assert.match(deployment, /automountServiceAccountToken: false/);
   assert.match(deployment, /audience: txo-fabric-private-identity/);
   assert.match(deployment, /expirationSeconds: 3600/);
-  assert.match(deployment, /name: TXO_WEBUI_BFF_BROWSER_ENABLED\s+value: "true"/);
-  assert.match(deployment, /name: TXO_FABRIC_PRIVATE_BRIDGE_ENABLED\s+value: "true"/);
+  assert.match(deployment, /name: TXO_WEBUI_BFF_BROWSER_ENABLED\s+value: "false"/);
+  assert.match(deployment, /name: TXO_FABRIC_PRIVATE_BRIDGE_ENABLED\s+value: "false"/);
   assert.match(deployment, /runAsNonRoot: true/);
   assert.match(deployment, /readOnlyRootFilesystem: true/);
   assert.match(deployment, /allowPrivilegeEscalation: false/);
