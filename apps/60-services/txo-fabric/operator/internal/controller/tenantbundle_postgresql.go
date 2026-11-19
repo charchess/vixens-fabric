@@ -105,6 +105,13 @@ func (r *TenantBundleReconciler) reconcilePostgreSQL(ctx context.Context, bundle
 	}
 
 	names := resolvePostgreSQLNames(bundle, &profile)
+	replacement, err := r.reconcilePostgreSQLClusterReplacement(ctx, bundle, &profile, names)
+	if err != nil {
+		return postgresqlResult{}, err
+	}
+	if replacement != nil {
+		return *replacement, nil
+	}
 	secret, blocked, err := r.ensurePostgreSQLSecret(ctx, bundle, &profile, names)
 	if err != nil {
 		return postgresqlResult{}, err
@@ -153,6 +160,83 @@ func (r *TenantBundleReconciler) reconcilePostgreSQL(ctx context.Context, bundle
 		Reason:  "Reconciled",
 		Message: fmt.Sprintf("tenant PostgreSQL Database and DatabaseRole are reconciled; credentials are stored in Secret %s", names.Secret),
 	}, nil
+}
+
+func (r *TenantBundleReconciler) reconcilePostgreSQLClusterReplacement(ctx context.Context, bundle *fabricv1alpha1.TenantBundle, profile *fabricv1alpha1.PostgreSQLProfile, names postgresqlNames) (*postgresqlResult, error) {
+	selector := client.MatchingLabels{
+		LabelManaged:    "true",
+		LabelTenantID:   bundle.Spec.TenantID,
+		LabelTenantName: bundle.Name,
+	}
+	old := make([]*unstructured.Unstructured, 0, 2)
+	current := 0
+	for _, resource := range []struct {
+		gvk      schema.GroupVersionKind
+		kind     string
+		name     string
+		postgres string
+	}{
+		{cnpgDatabaseGVK, "database", names.DatabaseResource, names.Database},
+		{cnpgDatabaseRoleGVK, "role", names.RoleResource, names.Role},
+	} {
+		objects := cnpgList(resource.gvk)
+		if err := r.List(ctx, objects, selector); err != nil {
+			return nil, err
+		}
+		for i := range objects.Items {
+			object := &objects.Items[i]
+			if object.GetLabels()[labelPostgreSQLResource] != resource.kind {
+				continue
+			}
+			if object.GetName() == resource.name && object.GetNamespace() == profile.Spec.Shared.ClusterRef.Namespace && immutableCNPGIdentityMatches(object, profile.Spec.Shared.ClusterRef.Name, resource.postgres) {
+				current++
+				continue
+			}
+			old = append(old, object.DeepCopy())
+		}
+	}
+	if len(old) == 0 {
+		return nil, nil
+	}
+	if current > 0 {
+		blocked := postgresqlBlocked("ClusterReplacementConflict", "canonical CloudNativePG resources already exist on the target cluster while old resources remain; refusing to delete either side", 0)
+		return &blocked, nil
+	}
+
+	replacement := bundle.Spec.Persistence.PostgreSQL.Replacement
+	if replacement == nil {
+		blocked := postgresqlBlocked("ClusterReplacementRequired", "Fabric-managed CloudNativePG resources have an immutable cluster identity incompatible with the selected profile; explicit v1 replacement is required", 0)
+		return &blocked, nil
+	}
+	if replacement.ContractVersion != "v1" || replacement.ID == "" || replacement.TenantID != bundle.Spec.TenantID || replacement.TenantName != bundle.Name || replacement.ProfileRef != profile.Name || replacement.ExpectedOldCluster.Name == "" || replacement.ExpectedOldCluster.Namespace == "" {
+		blocked := postgresqlBlocked("ClusterReplacementIneligible", "replacement contract must be v1 and exactly bind replacement ID, tenant ID/name, profile, and expected old cluster", 0)
+		return &blocked, nil
+	}
+	if replacement.ExpectedOldCluster.Name == profile.Spec.Shared.ClusterRef.Name && replacement.ExpectedOldCluster.Namespace == profile.Spec.Shared.ClusterRef.Namespace {
+		blocked := postgresqlBlocked("ClusterReplacementIneligible", "replacement expected old cluster must differ from the selected profile cluster", 0)
+		return &blocked, nil
+	}
+
+	for _, object := range old {
+		resourceKind := object.GetLabels()[labelPostgreSQLResource]
+		expectedName, expectedPostgresName := names.DatabaseResource, names.Database
+		if resourceKind == "role" {
+			expectedName, expectedPostgresName = names.RoleResource, names.Role
+		}
+		if (resourceKind != "database" && resourceKind != "role") || object.GetName() != expectedName || object.GetNamespace() != replacement.ExpectedOldCluster.Namespace || !postgresqlOwnedBy(object, bundle) || object.GetLabels()[labelPostgreSQLProfile] != profile.Name || !immutableCNPGIdentityMatches(object, replacement.ExpectedOldCluster.Name, expectedPostgresName) {
+			blocked := postgresqlBlocked("ClusterReplacementIneligible", "replacement contract does not exactly match every managed old CloudNativePG resource; refusing deletion", 0)
+			return &blocked, nil
+		}
+	}
+	for _, object := range old {
+		if object.GetDeletionTimestamp() == nil {
+			if err := r.Delete(ctx, object); err != nil && !apierrors.IsNotFound(err) {
+				return nil, err
+			}
+		}
+	}
+	pending := postgresqlPending("ClusterReplacementDeleting", fmt.Sprintf("replacement %q is removing exact Fabric-managed CloudNativePG resources from %s/%s; waiting for their absence before provisioning the canonical resources", replacement.ID, replacement.ExpectedOldCluster.Namespace, replacement.ExpectedOldCluster.Name), names, 2*time.Second)
+	return &pending, nil
 }
 
 func (r *TenantBundleReconciler) cleanupPostgreSQL(ctx context.Context, bundle *fabricv1alpha1.TenantBundle) (bool, error) {
@@ -226,9 +310,9 @@ func (r *TenantBundleReconciler) ensurePostgreSQLSecret(ctx context.Context, bun
 			Data: map[string][]byte{
 				corev1.BasicAuthUsernameKey: []byte(names.Role),
 				corev1.BasicAuthPasswordKey: []byte(password),
-				"host":                    []byte(profile.Spec.Shared.ClusterRef.Name + "-rw." + namespace + ".svc"),
-				"port":                    []byte("5432"),
-				"dbname":                  []byte(names.Database),
+				"host":                      []byte(profile.Spec.Shared.ClusterRef.Name + "-rw." + namespace + ".svc"),
+				"port":                      []byte("5432"),
+				"dbname":                    []byte(names.Database),
 			},
 		}
 		secret.Labels[cnpgReloadLabel] = "true"
@@ -257,9 +341,9 @@ func (r *TenantBundleReconciler) ensurePostgreSQLSecret(ctx context.Context, bun
 	desiredData := map[string][]byte{
 		corev1.BasicAuthUsernameKey: secret.Data[corev1.BasicAuthUsernameKey],
 		corev1.BasicAuthPasswordKey: secret.Data[corev1.BasicAuthPasswordKey],
-		"host":                    []byte(profile.Spec.Shared.ClusterRef.Name + "-rw." + namespace + ".svc"),
-		"port":                    []byte("5432"),
-		"dbname":                  []byte(names.Database),
+		"host":                      []byte(profile.Spec.Shared.ClusterRef.Name + "-rw." + namespace + ".svc"),
+		"port":                      []byte("5432"),
+		"dbname":                    []byte(names.Database),
 	}
 	if !reflect.DeepEqual(secret.Labels, mergedLabels) || !reflect.DeepEqual(secret.Data, desiredData) {
 		secret.Labels = mergedLabels

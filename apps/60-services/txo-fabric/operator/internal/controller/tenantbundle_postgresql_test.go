@@ -246,6 +246,147 @@ func TestPostgreSQLRetainCleanupDeletesCRsButKeepsCredentials(t *testing.T) {
 	}
 }
 
+func TestPostgreSQLClusterReplacementDeletesOnlyExactManagedOldResourcesBeforeProvisioning(t *testing.T) {
+	ctx := context.Background()
+	scheme := postgresqlTestScheme(t)
+	tenant := postgresqlTestTenant()
+	profile := postgresqlTestProfile()
+	profile.Spec.Shared.ClusterRef = fabricv1alpha1.PostgreSQLClusterReference{Name: "postgresql-next", Namespace: "databases-next"}
+	tenant.Spec.Persistence.PostgreSQL.Replacement = &fabricv1alpha1.PostgreSQLClusterReplacementSpec{
+		ContractVersion: "v1",
+		ID:              "replace-20261119",
+		TenantID:        tenant.Spec.TenantID,
+		TenantName:      tenant.Name,
+		ProfileRef:      profile.Name,
+		ExpectedOldCluster: fabricv1alpha1.PostgreSQLClusterReference{
+			Name: "postgresql-shared", Namespace: "databases",
+		},
+	}
+	names := resolvePostgreSQLNames(tenant, profile)
+	oldRole := cnpgObject(cnpgDatabaseRoleGVK, "databases", names.RoleResource)
+	oldRole.SetLabels(postgresqlLabels(tenant, profile, "role", "Retain"))
+	oldRole.Object["spec"] = map[string]interface{}{"cluster": map[string]interface{}{"name": "postgresql-shared"}, "name": names.Role}
+	oldDatabase := cnpgObject(cnpgDatabaseGVK, "databases", names.DatabaseResource)
+	oldDatabase.SetLabels(postgresqlLabels(tenant, profile, "database", "Retain"))
+	oldDatabase.Object["spec"] = map[string]interface{}{"cluster": map[string]interface{}{"name": "postgresql-shared"}, "name": names.Database}
+	newCluster := cnpgObject(cnpgClusterGVK, "databases-next", "postgresql-next")
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant, profile, oldRole, oldDatabase, newCluster).Build()
+	r := &TenantBundleReconciler{Client: c, Scheme: scheme}
+
+	result, err := r.reconcilePostgreSQL(ctx, tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Ready || result.Reason != "ClusterReplacementDeleting" {
+		t.Fatalf("expected old CR deletion state, got %#v", result)
+	}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(oldRole), cnpgObject(cnpgDatabaseRoleGVK, "databases", names.RoleResource)); !apierrors.IsNotFound(err) {
+		t.Fatalf("old DatabaseRole was not deleted: %v", err)
+	}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(oldDatabase), cnpgObject(cnpgDatabaseGVK, "databases", names.DatabaseResource)); !apierrors.IsNotFound(err) {
+		t.Fatalf("old Database was not deleted: %v", err)
+	}
+	secret := &corev1.Secret{}
+	if err := c.Get(ctx, types.NamespacedName{Namespace: "databases-next", Name: names.Secret}, secret); !apierrors.IsNotFound(err) {
+		t.Fatalf("new-cluster resources must wait for old CR absence, got %v", err)
+	}
+
+	result, err = r.reconcilePostgreSQL(ctx, tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Reason == "ClusterReplacementDeleting" {
+		t.Fatalf("replacement remained in deletion state after old CR absence: %#v", result)
+	}
+	newRole := cnpgObject(cnpgDatabaseRoleGVK, "databases-next", names.RoleResource)
+	if err := c.Get(ctx, client.ObjectKeyFromObject(newRole), newRole); err != nil {
+		t.Fatalf("canonical DatabaseRole was not provisioned after old absence: %v", err)
+	}
+}
+
+func TestPostgreSQLClusterReplacementFailsClosedForMismatchedEligibility(t *testing.T) {
+	ctx := context.Background()
+	scheme := postgresqlTestScheme(t)
+	tenant := postgresqlTestTenant()
+	profile := postgresqlTestProfile()
+	profile.Spec.Shared.ClusterRef = fabricv1alpha1.PostgreSQLClusterReference{Name: "postgresql-next", Namespace: "databases-next"}
+	tenant.Spec.Persistence.PostgreSQL.Replacement = &fabricv1alpha1.PostgreSQLClusterReplacementSpec{
+		ContractVersion: "v1", ID: "replace-20261119", TenantID: "TEN99999", TenantName: tenant.Name, ProfileRef: profile.Name,
+		ExpectedOldCluster: fabricv1alpha1.PostgreSQLClusterReference{Name: "postgresql-shared", Namespace: "databases"},
+	}
+	names := resolvePostgreSQLNames(tenant, profile)
+	oldRole := cnpgObject(cnpgDatabaseRoleGVK, "databases", names.RoleResource)
+	oldRole.SetLabels(postgresqlLabels(tenant, profile, "role", "Retain"))
+	oldRole.Object["spec"] = map[string]interface{}{"cluster": map[string]interface{}{"name": "postgresql-shared"}, "name": names.Role}
+	newCluster := cnpgObject(cnpgClusterGVK, "databases-next", "postgresql-next")
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant, profile, oldRole, newCluster).Build()
+	r := &TenantBundleReconciler{Client: c, Scheme: scheme}
+
+	result, err := r.reconcilePostgreSQL(ctx, tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Reason != "ClusterReplacementIneligible" || result.Status == nil || result.Status.Phase != "Blocked" {
+		t.Fatalf("expected fail-closed replacement block, got %#v", result)
+	}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(oldRole), cnpgObject(cnpgDatabaseRoleGVK, "databases", names.RoleResource)); err != nil {
+		t.Fatalf("ineligible replacement modified old DatabaseRole: %v", err)
+	}
+	newRole := cnpgObject(cnpgDatabaseRoleGVK, "databases-next", names.RoleResource)
+	if err := c.Get(ctx, client.ObjectKeyFromObject(newRole), newRole); !apierrors.IsNotFound(err) {
+		t.Fatalf("ineligible replacement provisioned new DatabaseRole: %v", err)
+	}
+}
+
+func TestPostgreSQLClusterReplacementRejectsEveryContractMismatchWithoutDeletion(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*fabricv1alpha1.PostgreSQLClusterReplacementSpec)
+	}{
+		{"unknown-version", func(s *fabricv1alpha1.PostgreSQLClusterReplacementSpec) { s.ContractVersion = "v2" }},
+		{"empty-id", func(s *fabricv1alpha1.PostgreSQLClusterReplacementSpec) { s.ID = "" }},
+		{"wrong-tenant-name", func(s *fabricv1alpha1.PostgreSQLClusterReplacementSpec) { s.TenantName = "another-tenant" }},
+		{"wrong-profile", func(s *fabricv1alpha1.PostgreSQLClusterReplacementSpec) { s.ProfileRef = "another-profile" }},
+		{"missing-old-namespace", func(s *fabricv1alpha1.PostgreSQLClusterReplacementSpec) { s.ExpectedOldCluster.Namespace = "" }},
+		{"same-old-and-new-cluster", func(s *fabricv1alpha1.PostgreSQLClusterReplacementSpec) {
+			s.ExpectedOldCluster = fabricv1alpha1.PostgreSQLClusterReference{Name: "postgresql-next", Namespace: "databases-next"}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			scheme := postgresqlTestScheme(t)
+			tenant := postgresqlTestTenant()
+			profile := postgresqlTestProfile()
+			profile.Spec.Shared.ClusterRef = fabricv1alpha1.PostgreSQLClusterReference{Name: "postgresql-next", Namespace: "databases-next"}
+			replacement := &fabricv1alpha1.PostgreSQLClusterReplacementSpec{
+				ContractVersion: "v1", ID: "replace-20261119", TenantID: tenant.Spec.TenantID, TenantName: tenant.Name, ProfileRef: profile.Name,
+				ExpectedOldCluster: fabricv1alpha1.PostgreSQLClusterReference{Name: "postgresql-shared", Namespace: "databases"},
+			}
+			tc.mutate(replacement)
+			tenant.Spec.Persistence.PostgreSQL.Replacement = replacement
+			names := resolvePostgreSQLNames(tenant, profile)
+			oldRole := cnpgObject(cnpgDatabaseRoleGVK, "databases", names.RoleResource)
+			oldRole.SetLabels(postgresqlLabels(tenant, profile, "role", "Retain"))
+			oldRole.Object["spec"] = map[string]interface{}{"cluster": map[string]interface{}{"name": "postgresql-shared"}, "name": names.Role}
+			newCluster := cnpgObject(cnpgClusterGVK, "databases-next", "postgresql-next")
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant, profile, oldRole, newCluster).Build()
+			r := &TenantBundleReconciler{Client: c, Scheme: scheme}
+
+			result, err := r.reconcilePostgreSQL(ctx, tenant)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Reason != "ClusterReplacementIneligible" || result.Status == nil || result.Status.Phase != "Blocked" {
+				t.Fatalf("expected fail-closed replacement block, got %#v", result)
+			}
+			if err := c.Get(ctx, client.ObjectKeyFromObject(oldRole), cnpgObject(cnpgDatabaseRoleGVK, "databases", names.RoleResource)); err != nil {
+				t.Fatalf("ineligible replacement modified old DatabaseRole: %v", err)
+			}
+		})
+	}
+}
+
 func postgresqlTestScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	scheme := testScheme(t)
