@@ -295,12 +295,15 @@ func TestPostgreSQLClusterReplacementDeletesOnlyExactManagedOldResourcesBeforePr
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Reason == "ClusterReplacementDeleting" {
-		t.Fatalf("replacement remained in deletion state after old CR absence: %#v", result)
+	if result.Ready || result.Reason != "ClusterReplacementAwaitingCredentialPhase" || result.Status == nil || result.Status.Phase != "AwaitingCredentialPhase" {
+		t.Fatalf("replacement must stop after old absence for the separate credential phase, got %#v", result)
 	}
 	newRole := cnpgObject(cnpgDatabaseRoleGVK, "databases-next", names.RoleResource)
-	if err := c.Get(ctx, client.ObjectKeyFromObject(newRole), newRole); err != nil {
-		t.Fatalf("canonical DatabaseRole was not provisioned after old absence: %v", err)
+	if err := c.Get(ctx, client.ObjectKeyFromObject(newRole), newRole); !apierrors.IsNotFound(err) {
+		t.Fatalf("replacement must not provision canonical DatabaseRole before the separate credential phase: %v", err)
+	}
+	if err := c.Get(ctx, types.NamespacedName{Namespace: "databases-next", Name: names.Secret}, &corev1.Secret{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("replacement must not create or update credentials after old absence: %v", err)
 	}
 }
 

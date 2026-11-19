@@ -112,6 +112,11 @@ func (r *TenantBundleReconciler) reconcilePostgreSQL(ctx context.Context, bundle
 	if replacement != nil {
 		return *replacement, nil
 	}
+	if request.Replacement != nil {
+		awaiting := postgresqlPending("ClusterReplacementAwaitingCredentialPhase", "old CloudNativePG resources are absent; replacement stops before credential or canonical-resource provisioning until the separate credential phase is authorized", names, 0)
+		awaiting.Status.Phase = "AwaitingCredentialPhase"
+		return awaiting, nil
+	}
 	secret, blocked, err := r.ensurePostgreSQLSecret(ctx, bundle, &profile, names)
 	if err != nil {
 		return postgresqlResult{}, err

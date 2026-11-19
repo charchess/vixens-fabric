@@ -297,9 +297,40 @@ type ComponentStatus struct {
 	Message string `json:"message,omitempty"`
 }
 
+// PostgreSQLClusterReplacementPhase is the durable, monotone controller state
+// for an admitted CNPG replacement. Credential material is deliberately outside
+// this protocol and is handled by a separately reviewed phase.
+// +kubebuilder:validation:Enum=Validated;DeletingOld;OldAbsent;AwaitingCredentialPhase;Completed;Blocked
+type PostgreSQLClusterReplacementPhase string
+
+const (
+	PostgreSQLClusterReplacementValidated               PostgreSQLClusterReplacementPhase = "Validated"
+	PostgreSQLClusterReplacementDeletingOld             PostgreSQLClusterReplacementPhase = "DeletingOld"
+	PostgreSQLClusterReplacementOldAbsent               PostgreSQLClusterReplacementPhase = "OldAbsent"
+	PostgreSQLClusterReplacementAwaitingCredentialPhase PostgreSQLClusterReplacementPhase = "AwaitingCredentialPhase"
+	PostgreSQLClusterReplacementCompleted               PostgreSQLClusterReplacementPhase = "Completed"
+	PostgreSQLClusterReplacementBlocked                 PostgreSQLClusterReplacementPhase = "Blocked"
+)
+
+// PostgreSQLClusterReplacementStatus freezes the exact approved replacement
+// contract. ReplacementID is retained from validation, ContractFingerprint
+// binds all destructive identities, and ConsumedID is written once old objects
+// are absent so a retry cannot replay the deletion protocol.
+type PostgreSQLClusterReplacementStatus struct {
+	Phase               PostgreSQLClusterReplacementPhase `json:"phase"`
+	ReplacementID       string                            `json:"replacementId"`
+	ContractFingerprint string                            `json:"contractFingerprint"`
+	ConsumedID          string                            `json:"consumedId,omitempty"`
+}
+
 type TenantPersistenceStatus struct {
 	// +optional
 	PostgreSQL *ComponentStatus `json:"postgresql,omitempty"`
+
+	// PostgreSQLReplacement is controller-owned durable evidence for a CNPG
+	// replacement. It contains no credentials and only advances monotonically.
+	// +optional
+	PostgreSQLReplacement *PostgreSQLClusterReplacementStatus `json:"postgresqlReplacement,omitempty"`
 }
 
 type TenantMemoryStatus struct {

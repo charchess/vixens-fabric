@@ -1005,6 +1005,35 @@ spec:
                           state.
                         type: string
                     type: object
+                  postgresqlReplacement:
+                    description: |-
+                      PostgreSQLReplacement is controller-owned durable evidence for a CNPG
+                      replacement. It contains no credentials and only advances monotonically.
+                    properties:
+                      consumedId:
+                        type: string
+                      contractFingerprint:
+                        type: string
+                      phase:
+                        description: |-
+                          PostgreSQLClusterReplacementPhase is the durable, monotone controller state
+                          for an admitted CNPG replacement. Credential material is deliberately outside
+                          this protocol and is handled by a separately reviewed phase.
+                        enum:
+                        - Validated
+                        - DeletingOld
+                        - OldAbsent
+                        - AwaitingCredentialPhase
+                        - Completed
+                        - Blocked
+                        type: string
+                      replacementId:
+                        type: string
+                    required:
+                    - contractFingerprint
+                    - phase
+                    - replacementId
+                    type: object
                 type: object
               phase:
                 enum:
