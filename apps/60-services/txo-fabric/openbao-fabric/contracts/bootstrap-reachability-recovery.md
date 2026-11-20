@@ -11,3 +11,5 @@ Service publication and grants no new client.
 
 No workload, RBAC, ServiceAccount, Job, certificate, Store, provider, bridge,
 gate, runtime action or credential material is introduced by this contract.
+
+Rollback removes only publishNotReadyAddresses; ESO ingress is never restored implicitly.
