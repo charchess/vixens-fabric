@@ -17,7 +17,7 @@ jobs:
     name: Repository hygiene
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 2
       - name: Verify required governance files
@@ -33,7 +33,7 @@ jobs:
     name: Release channel invariants
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Validate release workflow invariants
         run: python3 scripts/test-release-channel.py
       - name: Install actionlint
@@ -46,16 +46,69 @@ jobs:
       - name: Lint GitHub Actions workflows
         run: ./actionlint .github/workflows/*.yaml
 
+  openbao-fabric-contract:
+    name: OpenBao Fabric contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.11.1
+      - name: Verify and install Kustomize v5.4.3 (Linux amd64)
+        run: |
+          set -euo pipefail
+          KUSTOMIZE_VERSION=5.4.3
+          KUSTOMIZE_ARCHIVE="kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
+          KUSTOMIZE_SHA256=3669470b454d865c8184d6bce78df05e977c9aea31c30df3c669317d43bcc7a7
+          curl --fail --silent --show-error --location \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/v${KUSTOMIZE_VERSION}/${KUSTOMIZE_ARCHIVE}" \
+            -o "${KUSTOMIZE_ARCHIVE}"
+          printf '%s  %s\n' "${KUSTOMIZE_SHA256}" "${KUSTOMIZE_ARCHIVE}" | sha256sum -c -
+          tar -xzf "${KUSTOMIZE_ARCHIVE}" kustomize
+          install -m 0755 kustomize "${RUNNER_TEMP}/kustomize"
+          printf '%s\n' "${RUNNER_TEMP}" >> "$GITHUB_PATH"
+      - name: Verify and install kubectl v1.30.4 (Linux amd64)
+        run: |
+          set -euo pipefail
+          KUBECTL_VERSION=1.30.4
+          KUBECTL_SHA256=2ffd023712bbc1a9390dbd8c0c15201c165a69d394787ef03eda3eccb4b9ac06
+          curl --fail --silent --show-error --location \
+            "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+            -o kubectl
+          printf '%s  %s\n' "${KUBECTL_SHA256}" kubectl | sha256sum -c -
+          install -m 0755 kubectl "${RUNNER_TEMP}/kubectl"
+          printf '%s\n' "${RUNNER_TEMP}" >> "$GITHUB_PATH"
+      - name: Render OpenBao Fabric overlay
+        run: |
+          set -euo pipefail
+          kustomize build apps/60-services/txo-fabric/openbao-fabric/overlays/prod > openbao-fabric-rendered.yaml
+          test -s openbao-fabric-rendered.yaml
+      - name: Run immutable OpenBao storage audit contract
+        run: node --test apps/60-services/txo-fabric/openbao-fabric/overlays/prod/storage/audit-storage.test.mjs
+      - name: Run bootstrap reachability contract when base lacks no test
+        run: |
+          set -euo pipefail
+          # FAIL-CLOSED TRANSITION: when this test is first merged, the same change must replace this conditional with a mandatory invocation; the release invariant rejects the optional form once the file exists.
+          if test -f tests/test_openbao_bootstrap_reachability_contract.mjs; then
+            node --test tests/test_openbao_bootstrap_reachability_contract.mjs
+          else
+            printf '%s\n' 'bootstrap reachability contract absent from bound base; optional execution permitted only until first merge'
+          fi
+
   validation-summary:
     name: Validation Summary
     if: always()
-    needs: [repository-hygiene, release-channel-invariants]
+    needs: [repository-hygiene, release-channel-invariants, openbao-fabric-contract]
     runs-on: ubuntu-latest
     steps:
       - name: Fail closed on a non-success prerequisite
         env:
           HYGIENE: ${{ needs.repository-hygiene.result }}
           RELEASE_CHANNEL: ${{ needs.release-channel-invariants.result }}
+          OPENBAO_FABRIC_CONTRACT: ${{ needs.openbao-fabric-contract.result }}
         run: |
           test "$HYGIENE" = success
           test "$RELEASE_CHANNEL" = success
+          test "$OPENBAO_FABRIC_CONTRACT" = success
