@@ -65,6 +65,23 @@ for **new** Fabric consumers. Existing OpenFGA Infra references are
 documented migration debt and unchanged during this source-only
 increment.
 
+### ESO TokenRequest validation-only tuple
+
+The existing namespaced Fabric Store requests a temporary Kubernetes token with
+this exact validation-only tuple: mount `kubernetes`, role
+`txo-fabric-eso-webui-bff`, ServiceAccount `txo-fabric-eso` in
+`txo-fabric-system`, and TokenRequest audience
+`https://kubernetes.default.svc`. The Store declares the audience at
+`serviceAccountRef.audiences`, the schema-supported ServiceAccount selector
+field; its existing minimal RBAC remains one `create` on exactly
+`serviceaccounts/token` for that ServiceAccount.
+
+This declaration validates only the token request boundary. It creates no
+role/mount configuration, policy, record, target Secret or KV
+path, and it does not enable either browser/bridge gate. No ExternalSecret is
+created. A denied TokenRequest, validation failure or absent control-plane
+configuration is deny-only with no fallback.
+
 ### Reference policies
 
 `../policies/*.hcl.example` are **read-only examples**, not
