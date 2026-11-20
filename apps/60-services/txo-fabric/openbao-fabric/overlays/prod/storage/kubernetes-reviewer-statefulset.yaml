@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: openbao-fabric
+  namespace: txo-fabric-system
+spec:
+  template:
+    spec:
+      serviceAccountName: openbao-fabric-kubernetes-reviewer
+      automountServiceAccountToken: false
+      containers:
+        - name: openbao
+          volumeMounts:
+            - name: kubernetes-reviewer
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+      volumes:
+        - name: kubernetes-reviewer
+          projected:
+            defaultMode: 0440
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  audience: https://kubernetes.default.svc
+                  expirationSeconds: 3600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt

@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - eso-identity.yaml
   - eso-tokenrequest-rbac.yaml
+  - kubernetes-reviewer.yaml
   - bootstrap-contract.yaml
   - secret-store.yaml
   - openbao-client-networkpolicy.yaml

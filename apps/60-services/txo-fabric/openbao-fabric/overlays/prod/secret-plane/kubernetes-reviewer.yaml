@@ -1,0 +1,29 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-fabric-kubernetes-reviewer
+  namespace: txo-fabric-system
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: openbao-fabric-kubernetes-reviewer
+rules:
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: openbao-fabric-kubernetes-reviewer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: openbao-fabric-kubernetes-reviewer
+subjects:
+  - kind: ServiceAccount
+    name: openbao-fabric-kubernetes-reviewer
+    namespace: txo-fabric-system
