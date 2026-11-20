@@ -8,8 +8,11 @@ metadata:
     app.kubernetes.io/name: openbao-fabric
     app.kubernetes.io/component: secret-plane
     app.kubernetes.io/part-of: txo-fabric
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
 spec:
   type: ClusterIP
+  publishNotReadyAddresses: true
   selector:
     app.kubernetes.io/name: openbao-fabric
     app.kubernetes.io/component: secret-plane

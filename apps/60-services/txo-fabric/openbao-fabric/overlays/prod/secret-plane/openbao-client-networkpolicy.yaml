@@ -25,13 +25,3 @@ spec:
       ports:
         - port: 8200
           protocol: TCP
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: external-secrets
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: external-secrets
-      ports:
-        - port: 8200
-          protocol: TCP
