@@ -77,11 +77,13 @@ Certificate version metadata is nonsecret.
 generationId grammar: ^[a-z0-9][a-z0-9-]{7,63}$
 recordPath: apps/60-services/txo-fabric/openbao-fabric/contracts/trust/attestations/<generationId>.json
 
-chainRule: [leaf, intermediate*, root]
-- exactly one leaf at position 0
-- exactly one root at final position
-- CA/root absent => refuse
-- any extra, ambiguous or misordered element => refuse
+chainRule: [leaf, root]
+- exactly two certificates
+- leaf position 0
+- root final/position1
+- no intermediate
+- CA DER/SPKI digest source: root only
+- missing/additional/reordered/ambiguous/non-root-final => refuse
 
 A predecessor must exist, be prior, observed-not-trusted, distinct.
 predecessor forward/self/cycle => refuse
