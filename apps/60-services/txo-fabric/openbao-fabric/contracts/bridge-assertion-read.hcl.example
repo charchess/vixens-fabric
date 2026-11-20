@@ -1,0 +1,6 @@
+# SOURCE-ONLY / NOT INSTALLED.
+# Exact KV v2 read contract for the dedicated ESO role.
+# This file is normative policy input; it neither installs nor configures an auth method.
+path "fabric/data/platform/txo-fabric/webui-bff/bridge-assertion" {
+  capabilities = ["read"]
+}
