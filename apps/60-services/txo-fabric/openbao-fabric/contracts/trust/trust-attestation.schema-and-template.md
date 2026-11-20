@@ -70,6 +70,25 @@ TrustAttestation:
 
 `chainRule` requires the expected chain order/cardinality and hashes only future
 DER/SPKI observations; missing, extra, ambiguous or misordered CA is refused.
-Certificate version metadata is nonsecret. Placeholders are schema notation,
-not committed values. No encoded material, private key, payload, alternate
-endpoint, deployment surface or activation exists here.
+Certificate version metadata is nonsecret.
+
+## Deterministic chain and lineage validation
+
+generationId grammar: ^[a-z0-9][a-z0-9-]{7,63}$
+recordPath: apps/60-services/txo-fabric/openbao-fabric/contracts/trust/attestations/<generationId>.json
+
+chainRule: [leaf, intermediate*, root]
+- exactly one leaf at position 0
+- exactly one root at final position
+- CA/root absent => refuse
+- any extra, ambiguous or misordered element => refuse
+
+A predecessor must exist, be prior, observed-not-trusted, distinct.
+predecessor forward/self/cycle => refuse
+branching policy: one successor per predecessor; second successor => refuse
+
+The writer validates this schema before append-only creation. These are grammar
+and refusal rules only; no record, generation ID, digest or runtime action is
+created by this source contract. Placeholders are schema notation, not
+committed values. No encoded material, private key, payload, alternate endpoint,
+deployment surface or activation exists here.
