@@ -7,38 +7,28 @@ runtime action. No attestation record is created by this document.
 ## Authority split
 
 `endpointAuthority` is exactly
-`openbao-fabric.txo-fabric-system.svc.cluster.local:8200`. It identifies the
-network authority for a future observer and is not a value to place in an
-application configuration.
-
+`openbao-fabric.txo-fabric-system.svc.cluster.local:8200`.
 `sniAuthority` is exactly
-`openbao-fabric.txo-fabric-system.svc.cluster.local`. It is a portless TLS name
-and is deliberately distinct from `endpointAuthority`.
-
-The only initial status is `observed-not-trusted`. That status means a future
-observer may report structural source agreement but cannot establish trust from
-this document alone.
+`openbao-fabric.txo-fabric-system.svc.cluster.local`; every SNI field is this
+one portless name, with cardinality one. It is deliberately distinct from the
+endpoint authority.
 
 ## Immutable generation lifecycle
 
-The immutable generation lifecycle is defined as follows.
+The immutable generation lifecycle is append-only; append-only refusal rejects replacement or editing. A writer assigns one opaque
+immutable exact ID per generation; an existing ID collision refusal applies.
+`predecessorGeneration: none | <immutable exact ID>` permits either the first
+generation or precisely one prior generation. Allowed directory and filename
+are `trust/attestations/<immutable exact ID>.json` only; any other directory or
+filename is refused. Replacing or editing an existing generation is refused.
 
-A future attestation has an opaque `generation` selected by its authoritative
-writer exactly once. Generation is immutable: a later observation creates a
-new generation rather than modifying an earlier one. This template contains no
-generation value, digest, timestamp, chain material or observation result.
-
-Permitted lifecycle transitions are:
-
-`unrecorded -> observed-not-trusted`
-
-No transition to a trusted state is specified here. Expiry, replacement and
-revocation are future separately reviewed contracts.
+A future record begins `observationStatus: observed-not-trusted`. No trusted
+transition is specified here. `observedAt` is writer-observed metadata only;
+this template supplies no timestamp, ID, digest, observation or record.
 
 ## Structural source bindings
 
-A future observer binds these desired-source facts by object reference and key
-name only:
+These desired-source facts are references and names only:
 
 ```text
 certificateRef:
@@ -54,24 +44,23 @@ serviceRef:
   name: openbao-fabric
   namespace: txo-fabric-system
 sanSource:
-  certificate: openbao-fabric-tls
   requiredName: openbao-fabric.txo-fabric-system.svc.cluster.local
 ```
 
-`certificateRef`, `secretRef`, `serviceRef` and `sanSource` are structural
-references. They do not embed, request, read or project certificate material.
-The CA and leaf Certificate relationship remains a desired-source fact; no
-chain, key, encoded payload, Secret payload or endpoint observation belongs in
-this contract.
-
-## Future record shape
+## Future record schema placeholders
 
 ```text
 TrustAttestation:
-  generation: <writer-assigned-opaque-generation>
-  status: observed-not-trusted
+  generation: <writer-assigned-immutable-exact-ID>
+  predecessorGeneration: none | <immutable exact ID>
+  observedAt: <writer-observed-time>
+  observationStatus: observed-not-trusted
   endpointAuthority: openbao-fabric.txo-fabric-system.svc.cluster.local:8200
   sniAuthority: openbao-fabric.txo-fabric-system.svc.cluster.local
+  certificateVersionMetadata: <nonsecret-version-metadata>
+  caCertDerSha256: <64 lowercase hex>
+  caSpkiSha256: <64 lowercase hex>
+  chainRule: exact expected chain order/cardinality; hashed DER/SPKI; refusal missing/extra/ambiguous/misordered CA
   sources:
     certificateRef: <structural-reference-above>
     secretRef: <structural-reference-above>
@@ -79,5 +68,8 @@ TrustAttestation:
     sanSource: <structural-reference-above>
 ```
 
-The placeholders are schema notation, not values to commit. This contract has
-no alternate endpoint, no transport selection and no deployment surface.
+`chainRule` requires the expected chain order/cardinality and hashes only future
+DER/SPKI observations; missing, extra, ambiguous or misordered CA is refused.
+Certificate version metadata is nonsecret. Placeholders are schema notation,
+not committed values. No encoded material, private key, payload, alternate
+endpoint, deployment surface or activation exists here.
