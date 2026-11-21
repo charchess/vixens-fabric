@@ -88,17 +88,17 @@ jobs:
           set -euo pipefail
           kustomize build apps/60-services/txo-fabric/openbao-fabric/overlays/prod > openbao-fabric-rendered.yaml
           test -s openbao-fabric-rendered.yaml
-      - name: Run immutable OpenBao storage audit contract
-        run: node --test apps/60-services/txo-fabric/openbao-fabric/overlays/prod/storage/audit-storage.test.mjs
-      - name: Run bootstrap reachability contract when base lacks no test
+      - name: Bind OpenBao diff baseline to the PR base
+        env:
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
         run: |
           set -euo pipefail
-          # FAIL-CLOSED TRANSITION: when this test is first merged, the same change must replace this conditional with a mandatory invocation; the release invariant rejects the optional form once the file exists.
-          if test -f tests/test_openbao_bootstrap_reachability_contract.mjs; then
-            node --test tests/test_openbao_bootstrap_reachability_contract.mjs
-          else
-            printf '%s\n' 'bootstrap reachability contract absent from bound base; optional execution permitted only until first merge'
-          fi
+          test "$PR_BASE_REF" = main
+          git fetch --no-tags origin "refs/heads/${PR_BASE_REF}:refs/remotes/origin/${PR_BASE_REF}"
+      - name: Run immutable OpenBao storage audit contract
+        run: node --test apps/60-services/txo-fabric/openbao-fabric/overlays/prod/storage/audit-storage.test.mjs
+      - name: Run bootstrap reachability contract
+        run: node --test tests/test_openbao_bootstrap_reachability_contract.mjs
 
   validation-summary:
     name: Validation Summary
