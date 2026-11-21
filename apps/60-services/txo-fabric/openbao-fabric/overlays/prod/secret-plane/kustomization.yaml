@@ -7,6 +7,7 @@ resources:
   - kubernetes-reviewer.yaml
   - bootstrap-contract.yaml
   - secret-store.yaml
+  - bridge-assertion.externalsecret.yaml
   - openbao-client-networkpolicy.yaml
   - cerbera-test-egress-networkpolicy.yaml
   - cerbera-test-fqdn-egress.cilium.yaml
