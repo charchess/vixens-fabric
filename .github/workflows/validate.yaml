@@ -115,6 +115,10 @@ jobs:
         run: node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-contract.test.mjs
       - name: Run browser authority migration boundary contract
         run: node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-migration-boundary.test.mjs
+      - name: Run authority collaborators contract
+        run: node --test apps/60-services/txo-fabric/webui/server/authority/authority-collaborators.test.mjs
+      - name: Run authority collaborators negative contract
+        run: node --test apps/60-services/txo-fabric/webui/server/authority/authority-collaborators-negative.test.mjs
 
   validation-summary:
     name: Validation Summary
