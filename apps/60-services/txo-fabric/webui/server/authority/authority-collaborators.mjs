@@ -1,0 +1,9 @@
+const deny=()=>{throw Error("Browser authority denied")};
+const obj=x=>x&&typeof x==="object"&&!Array.isArray(x);
+const exact=(x,k)=>obj(x)&&Object.keys(x).sort().join(",")===[...k].sort().join(",");
+const sessionKeys=["sessionDigest","issuer","audience","subject","upstreamUserReference","issuedAt","expiresAt"];
+export function createVerifiedBrowserSessionResolverForTest({load}={}){if(typeof load!=="function")deny();return Object.freeze({async resolve(handle){const s=await load(handle);if(!exact(s,sessionKeys)||typeof s.sessionDigest!=="string"||!s.sessionDigest||!Number.isSafeInteger(s.issuedAt)||!Number.isSafeInteger(s.expiresAt)||s.expiresAt<=s.issuedAt)deny();return Object.freeze({...s})}})}
+export function createTenantRouteResolverForTest({resolve}={}){if(typeof resolve!=="function")deny();return Object.freeze({async resolve(routeRef,session){if(!exact(session,sessionKeys))deny();const r=await resolve(routeRef,session);if(!exact(r,["tenantKey","fabricTenantId","tenantBundleUID","issuer","audience","status"])||r.status!=="ready"||r.issuer!==session.issuer||r.audience!==session.audience)deny();return Object.freeze({...r})}})}
+export function createServerDerivedRosterResolverForTest({list}={}){if(typeof list!=="function")deny();return Object.freeze({async resolve(binding){if(!obj(binding))deny();const agents=await list(binding);if(!Array.isArray(agents)||agents.some(a=>!exact(a,["agentKey","agentUID","generation"])))deny();return Object.freeze(agents.map(a=>Object.freeze({...a})))}})}
+export function createBrowserAuthorityLedgerForTest({completeBootstrap,resolveBoundSession}={}){if(typeof completeBootstrap!=="function"||typeof resolveBoundSession!=="function")deny();return Object.freeze({completeBootstrap,resolveBoundSession})}
+export function createBoundThreadStoreForTest({create,get,claim}={}){if(typeof create!=="function"||typeof get!=="function"||typeof claim!=="function")deny();return Object.freeze({create,get,claim})}
