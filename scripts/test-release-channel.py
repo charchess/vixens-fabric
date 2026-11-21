@@ -99,7 +99,7 @@ def main() -> int:
         "needs: [repository-hygiene, release-channel-invariants, openbao-fabric-contract]",
         "OPENBAO_FABRIC_CONTRACT: ${{ needs.openbao-fabric-contract.result }}",
         "test \"$OPENBAO_FABRIC_CONTRACT\" = success",
-        "FAIL-CLOSED TRANSITION:",
+        "node --test tests/test_openbao_bootstrap_reachability_contract.mjs",
     ):
         require(validate, needle, validate_path)
     if "actions/checkout@v4" in validate or "actions/setup-node@v4" in validate:
@@ -127,12 +127,24 @@ def main() -> int:
         ),
         validate_path,
     )
-    bootstrap = ROOT / "tests" / "test_openbao_bootstrap_reachability_contract.mjs"
-    if bootstrap.exists():
-        raise AssertionError(
-            "bootstrap contract now exists: replace optional branch with mandatory node --test invocation in the same merge"
-        )
-    require(validate, "if test -f tests/test_openbao_bootstrap_reachability_contract.mjs; then", validate_path)
+    require_in_order(
+        validate,
+        (
+            "BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}",
+            '[[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]',
+            'git fetch --no-tags origin "$BASE_SHA"',
+            'test "$(git rev-parse FETCH_HEAD)" = "$BASE_SHA"',
+            'git cat-file -e "${BASE_SHA}^{commit}"',
+            'printf \'BASE_SHA=%s\\n\' "$BASE_SHA" >> "$GITHUB_ENV"',
+            "node --test apps/60-services/txo-fabric/openbao-fabric/overlays/prod/storage/audit-storage.test.mjs",
+            "node --test tests/test_openbao_bootstrap_reachability_contract.mjs",
+        ),
+        validate_path,
+    )
+    if "if test -f tests/test_openbao_bootstrap_reachability_contract.mjs; then" in validate:
+        raise AssertionError("validate.yaml must not retain the optional bootstrap execution path")
+    if "origin/main...HEAD" in validate:
+        raise AssertionError("validate.yaml must not use origin/main as bootstrap diff authority")
 
     print("release-channel workflow invariants: PASS")
     return 0
