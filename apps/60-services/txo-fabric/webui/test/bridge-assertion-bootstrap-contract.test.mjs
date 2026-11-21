@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 const root=new URL("../../",import.meta.url);
 const read=p=>readFileSync(new URL(p,root),"utf8");
-test("bridge bootstrap contract is non-applied, exact and least privilege",()=>{
- const policy=read("openbao-fabric/contracts/bridge-assertion-read.hcl.example");
- const example=read("openbao-fabric/contracts/bridge-assertion.externalsecret.yaml.example");
+test("bridge assertion projection is exact, minimal and bridge-off",()=>{
  const active=read("openbao-fabric/overlays/prod/secret-plane/kustomization.yaml");
- assert.match(policy,/SOURCE-ONLY \/ NOT INSTALLED/);assert.match(policy,/path "fabric\/data\/platform\/txo-fabric\/webui-bff\/bridge-assertion"/);assert.match(policy,/capabilities = \["read"\]/);assert.doesNotMatch(policy,/list|create|update|delete|sudo|metadata/);
- assert.match(example,/SOURCE-ONLY \/ NOT APPLIED/);assert.match(example,/kind: ExternalSecret/);assert.equal(example.match(/kind: ExternalSecret/g)?.length,1);assert.match(example,/name: openbao-fabric-store/);assert.match(example,/kind: SecretStore/);assert.match(example,/name: txo-fabric-private-bridge-assertion/);assert.match(example,/secretKey: hmac-key/);assert.match(example,/key: platform\/txo-fabric\/webui-bff\/bridge-assertion/);assert.match(example,/property: hmac-key/);
- for(const bad of [/dataFrom:/,/find:/,/template:/,/ClusterSecretStore/,/token:/,/value:/,/stringData:/,/hmac-key:\s*[^\n]/])assert.doesNotMatch(example,bad);
- assert.doesNotMatch(active,/bridge-assertion|txo-fabric-private-bridge-assertion|ExternalSecret/);
+ const projection=read("openbao-fabric/overlays/prod/secret-plane/bridge-assertion.externalsecret.yaml");
+ assert.match(active,/bridge-assertion\.externalsecret\.yaml/);
+ assert.match(projection,/kind: ExternalSecret/); assert.match(projection,/name: txo-fabric-private-bridge-assertion/);
+ assert.match(projection,/name: openbao-fabric-store/); assert.match(projection,/secretKey: hmac-key/);
+ assert.match(projection,/key: platform\/txo-fabric\/webui-bff\/bridge-assertion/); assert.match(projection,/property: hmac-key/);
+ for(const bad of [/dataFrom:/,/find:/,/template:/,/ClusterSecretStore/,/token:/,/value:/,/stringData:/,/TXO_WEBUI_BFF_BROWSER_ENABLED/,/TXO_FABRIC_PRIVATE_BRIDGE_ENABLED/]) assert.doesNotMatch(projection,bad);
 });
