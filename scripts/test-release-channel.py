@@ -96,9 +96,15 @@ def main() -> int:
         "node --test apps/60-services/txo-fabric/openbao-fabric/overlays/prod/storage/audit-storage.test.mjs",
         "openbao-fabric-contract:",
         "OpenBao Fabric contract",
-        "needs: [repository-hygiene, release-channel-invariants, openbao-fabric-contract]",
+        "browser-authority-contract:",
+        "Browser authority contract",
+        "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-contract.test.mjs",
+        "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-migration-boundary.test.mjs",
+        "needs: [repository-hygiene, release-channel-invariants, openbao-fabric-contract, browser-authority-contract]",
         "OPENBAO_FABRIC_CONTRACT: ${{ needs.openbao-fabric-contract.result }}",
+        "BROWSER_AUTHORITY_CONTRACT: ${{ needs.browser-authority-contract.result }}",
         "test \"$OPENBAO_FABRIC_CONTRACT\" = success",
+        "test \"$BROWSER_AUTHORITY_CONTRACT\" = success",
         "node --test tests/test_openbao_bootstrap_reachability_contract.mjs",
     ):
         require(validate, needle, validate_path)
@@ -145,6 +151,15 @@ def main() -> int:
         raise AssertionError("validate.yaml must not retain the optional bootstrap execution path")
     if "origin/main...HEAD" in validate:
         raise AssertionError("validate.yaml must not use origin/main as bootstrap diff authority")
+
+    for authority_test in (
+        "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-contract.test.mjs",
+        "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-migration-boundary.test.mjs",
+    ):
+        if validate.count(authority_test) != 1:
+            raise AssertionError(f"validate.yaml must invoke exactly once: {authority_test}")
+    if "browser-authority-contract:\n    if:" in validate or "continue-on-error:" in validate:
+        raise AssertionError("browser authority contract must not have a permissive bypass")
 
     print("release-channel workflow invariants: PASS")
     return 0
