@@ -80,6 +80,12 @@ def main() -> int:
     for needle in (
         "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2",
         "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0",
+        'ACTIONLINT_VERSION=1.7.7',
+        'ACTIONLINT_ARCHIVE="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"',
+        'ACTIONLINT_SHA256=023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757',
+        'printf \'%s  %s\\n\' "${ACTIONLINT_SHA256}" "${ACTIONLINT_ARCHIVE}" | sha256sum -c -',
+        'tar -xzf "${ACTIONLINT_ARCHIVE}" actionlint',
+        './actionlint .github/workflows/*.yaml',
         "fetch-depth: 0",
         "KUSTOMIZE_VERSION=5.4.3",
         "KUSTOMIZE_SHA256=3669470b454d865c8184d6bce78df05e977c9aea31c30df3c669317d43bcc7a7",

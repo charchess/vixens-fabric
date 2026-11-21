@@ -191,7 +191,7 @@ test("PR100 ESO ingress ordering is base-bound and fail-closed", () => {
   // This is a static CI contract: invoking kubectl create, even with client dry-run,
   // can trigger API discovery and silently turn the test into a cluster-dependent gate.
   // Verify the source and rendered policy directly instead.
-  const assertPolicyContract = source => {
+  const assertPolicyMetadata = source => {
     assert.match(source, /^apiVersion: networking\.k8s\.io\/v1\nkind: NetworkPolicy\nmetadata:/m);
     assert.match(source, /name: openbao-fabric-eso-clients\n  namespace: txo-fabric-system/);
     assert.match(source, /argocd\.argoproj\.io\/sync-wave: "-4"/);
@@ -200,14 +200,49 @@ test("PR100 ESO ingress ordering is base-bound and fail-closed", () => {
     assert.match(source, /app\.kubernetes\.io\/component: secret-plane$/m);
     assert.match(source, /app\.kubernetes\.io\/name: openbao-fabric/);
     assert.match(source, /policyTypes:\s*(?:\[Ingress\]|\n  - Ingress)/);
-    assert.equal(count(source, /^\s*- from:$/gm), 2);
-    assert.equal(count(source, /^\s*- port: 8200$/gm), 2);
-    assert.equal(count(source, /^\s*protocol: TCP$/gm), 2);
-    assert.match(source, /app\.kubernetes\.io\/component: secret-plane-bootstrap/);
-    assert.match(source, /kubernetes\.io\/metadata\.name: external-secrets/);
-    assert.match(source, /app\.kubernetes\.io\/name: external-secrets/);
   };
-  assertPolicyContract(policy); assertPolicyContract(renderedPolicy);
+  const expectedIngress = [
+    { from: [{ podSelector: { matchLabels: { "app.kubernetes.io/name": "openbao-fabric", "app.kubernetes.io/component": "secret-plane-bootstrap" } } }], ports: [{ port: 8200, protocol: "TCP" }] },
+    { from: [{ namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": "external-secrets" } }, podSelector: { matchLabels: { "app.kubernetes.io/name": "external-secrets" } } }], ports: [{ port: 8200, protocol: "TCP" }] },
+  ];
+  const parseIngress = source => {
+    const lines = source.trimEnd().split("\n");
+    const ingress = lines.indexOf("  ingress:");
+    assert.ok(ingress >= 0, "NetworkPolicy ingress must exist");
+    const indentation = line => line.length - line.trimStart().length;
+    const starts = []; let ruleIndent; let ingressEnd = lines.length;
+    for (let index = ingress + 1; index < lines.length; index += 1) {
+      const line = lines[index]; const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (trimmed === "- from:") { if (ruleIndent === undefined) ruleIndent = indentation(line); assert.equal(indentation(line), ruleIndent, "ingress peers must be sibling rules"); starts.push(index); continue; }
+      if (ruleIndent !== undefined && indentation(line) <= ruleIndent) { ingressEnd = index; break; }
+    }
+    assert.ok(starts.length > 0, "NetworkPolicy ingress rules must exist");
+    return starts.map((start, position) => {
+      const end = starts[position + 1] ?? ingressEnd;
+      const rule = { from: [], ports: [] }; let inPorts = false; let peer; let labels; let port;
+      for (const raw of lines.slice(start + 1, end)) {
+        const value = raw.trim(); if (!value) continue;
+        if (value === "ports:") { assert.equal(inPorts, false); inPorts = true; labels = undefined; continue; }
+        if (!inPorts) {
+          if (value === "- podSelector:") { assert.equal(peer, undefined); peer = {}; rule.from.push(peer); peer.podSelector = { matchLabels: {} }; labels = peer.podSelector.matchLabels; continue; }
+          if (value === "- namespaceSelector:") { assert.equal(peer, undefined); peer = {}; rule.from.push(peer); peer.namespaceSelector = { matchLabels: {} }; labels = peer.namespaceSelector.matchLabels; continue; }
+          if (value === "podSelector:") { assert.ok(peer); assert.equal(peer.podSelector, undefined); peer.podSelector = { matchLabels: {} }; labels = peer.podSelector.matchLabels; continue; }
+          if (value === "matchLabels:") { assert.ok(labels); continue; }
+          const separator = value.indexOf(": "); assert.ok(separator > 0 && labels, `unexpected NetworkPolicy peer entry: ${value}`); labels[value.slice(0, separator)] = value.slice(separator + 2); continue;
+        }
+        if (value === "- port: 8200") { assert.equal(port, undefined); port = { port: 8200 }; rule.ports.push(port); continue; }
+        if (value === "protocol: TCP") { assert.ok(port); assert.equal(port.protocol, undefined); port.protocol = "TCP"; continue; }
+        assert.fail(`unexpected NetworkPolicy port entry: ${value}`);
+      }
+      assert.ok(rule.from.length); assert.ok(rule.ports.length); return rule;
+    });
+  };
+  assert.ok(renderedPolicy);
+  assertPolicyMetadata(policy); assertPolicyMetadata(renderedPolicy);
+  assert.deepEqual(parseIngress(policy), expectedIngress);
+  assert.deepEqual(parseIngress(renderedPolicy), expectedIngress);
+  assert.throws(() => parseIngress(policy.replace("          protocol: TCP", "          protocol: UDP")));
   assert.equal(wave(policy), "-4");
   assert.equal(wave(pvc), "-4"); assert.equal(wave(patch), "-4"); assert.equal(wave(secretStore), "-3");
   assert.ok(renderedPolicy); assert.ok(renderedPvc); assert.ok(renderedStatefulSet); assert.ok(renderedStore);
