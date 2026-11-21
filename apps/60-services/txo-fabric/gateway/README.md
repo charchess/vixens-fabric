@@ -345,7 +345,7 @@ binding, and TCP/4000 to `txo-ai-gateway`. Hindsight receives no generic provide
 Internet egress.
 
 `NetworkPolicy/txo-ai-gateway-schema-upgrade-egress` separately limits the schema-upgrade
-Job to DNS plus TCP/5432 toward `postgresql-shared-recovery`. The schema-upgrade pod uses a
+Job to DNS plus TCP/5432 toward `postgresql-shared`. The schema-upgrade pod uses a
 distinct `app.kubernetes.io/name` label and is never selected by
 `Service/txo-ai-gateway`.
 
