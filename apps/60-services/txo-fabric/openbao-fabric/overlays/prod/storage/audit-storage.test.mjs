@@ -238,10 +238,36 @@ test("PR100 ESO ingress ordering is base-bound and fail-closed", () => {
       assert.ok(rule.from.length); assert.ok(rule.ports.length); return rule;
     });
   };
+  const expectedSpec = {
+    podSelector: { matchLabels: { "app.kubernetes.io/name": "openbao-fabric", "app.kubernetes.io/component": "secret-plane" } },
+    policyTypes: ["Ingress"],
+    ingress: expectedIngress,
+  };
+  const parseSpec = source => {
+    const lines = source.trimEnd().split("\n"); const indentation = line => line.length - line.trimStart().length;
+    const spec = lines.findIndex((line, index) => index >= 0 && indentation(line) === 0 && line.trim() === "spec:");
+    assert.ok(spec >= 0, "NetworkPolicy spec must exist");
+    const fields = [];
+    for (let index = spec + 1; index < lines.length; index += 1) {
+      const line = lines[index]; if (line && indentation(line) === 0) break;
+      if (line && indentation(line) === 2 && !line.trim().startsWith("-")) fields.push(line.trim().split(":")[0]);
+    }
+    assert.deepEqual(fields.sort(), ["ingress", "podSelector", "policyTypes"]);
+    const selector = lines.findIndex((line, index) => index > spec && indentation(line) === 2 && line.trim() === "podSelector:");
+    assert.ok(selector >= 0); const labels = {};
+    for (let index = selector + 1; index < lines.length; index += 1) {
+      const line = lines[index]; if (line && indentation(line) <= 2) break; const value = line.trim(); if (!value || value === "matchLabels:") continue;
+      const separator = value.indexOf(": "); assert.ok(separator > 0, `unexpected target selector entry: ${value}`); labels[value.slice(0, separator)] = value.slice(separator + 2);
+    }
+    const types = lines.findIndex((line, index) => index > spec && indentation(line) === 2 && (line.trim() === "policyTypes:" || line.trim() === "policyTypes: [Ingress]"));
+    assert.ok(types >= 0); const typeLine = lines[types].trim();
+    const policyTypes = typeLine === "policyTypes: [Ingress]" ? ["Ingress"] : [lines.slice(types + 1).find(line => line.trim().startsWith("- "))?.trim().replace(/^- /, "")];
+    return { podSelector: { matchLabels: labels }, policyTypes, ingress: parseIngress(source) };
+  };
   assert.ok(renderedPolicy);
   assertPolicyMetadata(policy); assertPolicyMetadata(renderedPolicy);
-  assert.deepEqual(parseIngress(policy), expectedIngress);
-  assert.deepEqual(parseIngress(renderedPolicy), expectedIngress);
+  assert.deepEqual(parseSpec(policy), expectedSpec);
+  assert.deepEqual(parseSpec(renderedPolicy), expectedSpec);
   assert.throws(() => parseIngress(policy.replace("          protocol: TCP", "          protocol: UDP")));
   assert.equal(wave(policy), "-4");
   assert.equal(wave(pvc), "-4"); assert.equal(wave(patch), "-4"); assert.equal(wave(secretStore), "-3");

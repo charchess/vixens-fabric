@@ -117,6 +117,16 @@ def main() -> int:
         ),
         validate_path,
     )
+    require_in_order(
+        validate,
+        (
+            "ACTIONLINT_SHA256=023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757",
+            'printf \'%s  %s\\n\' "${ACTIONLINT_SHA256}" "${ACTIONLINT_ARCHIVE}" | sha256sum -c -',
+            'tar -xzf "${ACTIONLINT_ARCHIVE}" actionlint',
+            "./actionlint .github/workflows/*.yaml",
+        ),
+        validate_path,
+    )
     bootstrap = ROOT / "tests" / "test_openbao_bootstrap_reachability_contract.mjs"
     if bootstrap.exists():
         raise AssertionError(
