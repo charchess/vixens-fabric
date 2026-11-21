@@ -261,7 +261,16 @@ test("PR100 ESO ingress ordering is base-bound and fail-closed", () => {
     }
     const types = lines.findIndex((line, index) => index > spec && indentation(line) === 2 && (line.trim() === "policyTypes:" || line.trim() === "policyTypes: [Ingress]"));
     assert.ok(types >= 0); const typeLine = lines[types].trim();
-    const policyTypes = typeLine === "policyTypes: [Ingress]" ? ["Ingress"] : [lines.slice(types + 1).find(line => line.trim().startsWith("- "))?.trim().replace(/^- /, "")];
+    const policyTypes = [];
+    if (typeLine === "policyTypes: [Ingress]") policyTypes.push("Ingress");
+    else {
+      for (const line of lines.slice(types + 1)) {
+        const value = line.trim(); if (!value) continue;
+        if (indentation(line) <= 2 && !value.startsWith("- ")) break;
+        assert.ok(value.startsWith("- "), `unexpected policyTypes entry: ${value}`);
+        policyTypes.push(value.slice(2));
+      }
+    }
     return { podSelector: { matchLabels: labels }, policyTypes, ingress: parseIngress(source) };
   };
   assert.ok(renderedPolicy);
