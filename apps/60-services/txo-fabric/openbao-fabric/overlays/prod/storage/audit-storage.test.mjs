@@ -146,6 +146,7 @@ test("audit storage aligns WFFC waves before its SecretStore", () => {
     "apps/60-services/txo-fabric/gateway/schema-upgrade-networkpolicy.yaml",
   ];
   const cnpgTestPath = "apps/60-services/txo-fabric/openbao-fabric/overlays/prod/storage/audit-storage.test.mjs";
+  const prohibitedLegacyCluster = new RegExp(["postgresql", "shared", "recovery"].join("-"));
   const cnpgBaselines = new Map([
     [cnpgPaths[0], "fc570cc30b2cb3cf37f8e769c131f9de7a689fe31cedf123492623a1e05f394d"],
     [cnpgPaths[1], "3c908a161d611118cd0f6d1f2223f97608ccdf735efbeb644c4199929043a3d9"],
@@ -157,7 +158,7 @@ test("audit storage aligns WFFC waves before its SecretStore", () => {
   for (const rel of cnpgPaths) {
     const text = readFileSync(`${repoRoot}/${rel}`, "utf8");
     assert.match(text, /postgresql-shared/);
-    assert.doesNotMatch(text, /postgresql-shared-recovery/);
+    assert.doesNotMatch(text, prohibitedLegacyCluster);
     const normalized = text.replaceAll("postgresql-shared", "__CNPG_SHARED_TARGET__");
     assert.equal(createHash("sha256").update(normalized).digest("hex"), cnpgBaselines.get(rel));
   }
@@ -166,7 +167,7 @@ test("audit storage aligns WFFC waves before its SecretStore", () => {
     const document = renderedDocument(cnpgRendered, kind, name);
     assert.ok(document);
     assert.match(document, /postgresql-shared/);
-    assert.doesNotMatch(document, /postgresql-shared-recovery/);
+    assert.doesNotMatch(document, prohibitedLegacyCluster);
     if (kind === "NetworkPolicy") assert.match(document, /port: 5432/);
   }
   // CERBERE_CNPG_STANDARDIZATION_GUARD_END
