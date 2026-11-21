@@ -103,10 +103,23 @@ jobs:
       - name: Run bootstrap reachability contract
         run: node --test tests/test_openbao_bootstrap_reachability_contract.mjs
 
+  browser-authority-contract:
+    name: Browser authority contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.11.1
+      - name: Run browser authority core contract
+        run: node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-contract.test.mjs
+      - name: Run browser authority migration boundary contract
+        run: node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-migration-boundary.test.mjs
+
   validation-summary:
     name: Validation Summary
     if: always()
-    needs: [repository-hygiene, release-channel-invariants, openbao-fabric-contract]
+    needs: [repository-hygiene, release-channel-invariants, openbao-fabric-contract, browser-authority-contract]
     runs-on: ubuntu-latest
     steps:
       - name: Fail closed on a non-success prerequisite
@@ -114,7 +127,9 @@ jobs:
           HYGIENE: ${{ needs.repository-hygiene.result }}
           RELEASE_CHANNEL: ${{ needs.release-channel-invariants.result }}
           OPENBAO_FABRIC_CONTRACT: ${{ needs.openbao-fabric-contract.result }}
+          BROWSER_AUTHORITY_CONTRACT: ${{ needs.browser-authority-contract.result }}
         run: |
           test "$HYGIENE" = success
           test "$RELEASE_CHANNEL" = success
           test "$OPENBAO_FABRIC_CONTRACT" = success
+          test "$BROWSER_AUTHORITY_CONTRACT" = success
