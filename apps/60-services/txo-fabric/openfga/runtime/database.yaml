@@ -11,7 +11,7 @@ metadata:
     app.kubernetes.io/part-of: txo-fabric
 spec:
   cluster:
-    name: postgresql-shared
+    name: postgresql-shared-recovery
   name: txo_fabric_openfga
   comment: OpenFGA shared Fabric authorization datastore role
   login: true
@@ -39,7 +39,7 @@ metadata:
     app.kubernetes.io/part-of: txo-fabric
 spec:
   cluster:
-    name: postgresql-shared
+    name: postgresql-shared-recovery
   name: txo_fabric_openfga
   owner: txo_fabric_openfga
   ensure: present
