@@ -22,6 +22,8 @@ spec:
     namespace: txo-fabric-system
   syncPolicy:
     automated:
-      enabled: false
+      # prod-stable is the canonical moving production channel.
+      # Reconcile every promoted production revision automatically.
+      enabled: true
       prune: true
       selfHeal: true
