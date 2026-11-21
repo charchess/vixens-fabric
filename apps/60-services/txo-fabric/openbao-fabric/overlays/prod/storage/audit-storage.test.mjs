@@ -178,7 +178,7 @@ test("audit storage aligns WFFC waves before its SecretStore", () => {
 });
 
 // BEGIN CERBERE_PR100_ESO_FAIL_CLOSED_GUARD
-test("PR100 ESO ingress ordering is base-bound and fail-closed", () => {
+test("bootstrap reachability ingress is single-peer fail-closed", () => {
   const policy = read("../secret-plane/openbao-client-networkpolicy.yaml");
   const pvc = read("./audit-pvc.yaml");
   const patch = read("./audit-statefulset-volume.yaml");
@@ -203,7 +203,6 @@ test("PR100 ESO ingress ordering is base-bound and fail-closed", () => {
   };
   const expectedIngress = [
     { from: [{ podSelector: { matchLabels: { "app.kubernetes.io/name": "openbao-fabric", "app.kubernetes.io/component": "secret-plane-bootstrap" } } }], ports: [{ port: 8200, protocol: "TCP" }] },
-    { from: [{ namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": "external-secrets" } }, podSelector: { matchLabels: { "app.kubernetes.io/name": "external-secrets" } } }], ports: [{ port: 8200, protocol: "TCP" }] },
   ];
   const parseIngress = source => {
     const lines = source.trimEnd().split("\n");
@@ -275,6 +274,7 @@ test("PR100 ESO ingress ordering is base-bound and fail-closed", () => {
   };
   assert.ok(renderedPolicy);
   assertPolicyMetadata(policy); assertPolicyMetadata(renderedPolicy);
+  for (const source of [policy, renderedPolicy]) assert.doesNotMatch(source, /namespaceSelector|external-secrets|ipBlock/);
   assert.deepEqual(parseSpec(policy), expectedSpec);
   assert.deepEqual(parseSpec(renderedPolicy), expectedSpec);
   assert.throws(() => parseIngress(policy.replace("          protocol: TCP", "          protocol: UDP")));
@@ -282,8 +282,8 @@ test("PR100 ESO ingress ordering is base-bound and fail-closed", () => {
   assert.equal(wave(pvc), "-4"); assert.equal(wave(patch), "-4"); assert.equal(wave(secretStore), "-3");
   assert.ok(renderedPolicy); assert.ok(renderedPvc); assert.ok(renderedStatefulSet); assert.ok(renderedStore);
   assert.equal(wave(renderedPolicy), "-4"); assert.equal(wave(renderedPvc), "-4"); assert.equal(wave(renderedStatefulSet), "-4"); assert.equal(wave(renderedStore), "-3");
-  assert.equal(count(renderedPolicy, /port: 8200/g), 2);
-  assert.equal(count(renderedPolicy, /protocol: TCP/g), 2);
+  assert.equal(count(renderedPolicy, /port: 8200/g), 1);
+  assert.equal(count(renderedPolicy, /protocol: TCP/g), 1);
   assert.doesNotMatch(renderedPolicy, /^  egress:/m);
   assert.equal(count(renderedStatefulSet, /claimName: openbao-fabric-audit/g), 1);
   assert.equal(count(renderedStatefulSet, /mountPath: \/openbao\/audit/g), 1);
