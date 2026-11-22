@@ -158,6 +158,11 @@ jobs:
         run: node --test apps/60-services/txo-fabric/webui/server/authority/client0-bootstrap-ledger.test.mjs
       - name: Run Client0 ledger negative contract
         run: node --test apps/60-services/txo-fabric/webui/server/authority/client0-ledger-negative.test.mjs
+      - name: Run Client0 canonical read-set eligibility contract
+        working-directory: apps/60-services/txo-fabric/operator
+        run: go test ./internal/controller -run '^TestClient0EligibilityFromCanonicalReadSetRejectsAuthorityGaps$'
+      - name: Run Client0 eligibility adapter boundary contract
+        run: node --test apps/60-services/txo-fabric/operator/internal/controller/client0_eligibility_adapter_boundary.test.mjs
 
   validation-summary:
     name: Validation Summary

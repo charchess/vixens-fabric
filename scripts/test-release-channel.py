@@ -105,6 +105,8 @@ def main() -> int:
         "go test ./internal/controller -run '^TestEvaluateClient0BootstrapEligibility$'",
         "node --test apps/60-services/txo-fabric/webui/server/authority/client0-bootstrap-ledger.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/client0-ledger-negative.test.mjs",
+        "go test ./internal/controller -run '^TestClient0EligibilityFromCanonicalReadSetRejectsAuthorityGaps$'",
+        "node --test apps/60-services/txo-fabric/operator/internal/controller/client0_eligibility_adapter_boundary.test.mjs",
         "node --test apps/60-services/txo-fabric/openfga/runtime/openfga-runtime-hook.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-contract.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-migration-boundary.test.mjs",
@@ -199,6 +201,8 @@ def main() -> int:
         "go test ./internal/controller -run '^TestEvaluateClient0BootstrapEligibility$'",
         "node --test apps/60-services/txo-fabric/webui/server/authority/client0-bootstrap-ledger.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/client0-ledger-negative.test.mjs",
+        "go test ./internal/controller -run '^TestClient0EligibilityFromCanonicalReadSetRejectsAuthorityGaps$'",
+        "node --test apps/60-services/txo-fabric/operator/internal/controller/client0_eligibility_adapter_boundary.test.mjs",
     )
     for client0_test in client0_tests:
         if validate.count(client0_test) != 1:
