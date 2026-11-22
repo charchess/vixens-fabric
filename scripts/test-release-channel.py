@@ -186,6 +186,7 @@ def main() -> int:
         "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-store-negative.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-store-numeric-negative.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/browser-authority-004-intent/browser-authority-004-intent.test.mjs",
+        "node --test apps/60-services/txo-fabric/webui/test/bff-runtime-credentials-durability.test.mjs",
     )
     for authority_test in authority_tests:
         if validate.count(authority_test) != 1:
