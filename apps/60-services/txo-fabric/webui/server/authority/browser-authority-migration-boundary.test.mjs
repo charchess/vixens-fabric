@@ -46,7 +46,7 @@ test("startup and delivery roots have no migration selector", () => {
   const packageJson = JSON.parse(read("apps/60-services/txo-fabric/webui/package.json"));
   assert.deepEqual(packageJson.scripts, { test: "node --test", "start:private": "node server/private-bff-main.mjs" });
   const runtime = read("apps/60-services/txo-fabric/webui/runtime/kustomization.yaml");
-  assert.deepEqual([...runtime.matchAll(/^\s+-\s+([^\s]+)$/gm)].map(([, resource]) => resource), ["serviceaccount.yaml", "deployment.yaml", "service.yaml", "ingress.yaml", "networkpolicy.yaml", "cilium-networkpolicy.yaml"]);
+  assert.deepEqual([...runtime.matchAll(/^\s+-\s+([^\s]+)$/gm)].map(([, resource]) => resource), ["serviceaccount.yaml", "bff-runtime-credentials.externalsecret.yaml", "deployment.yaml", "service.yaml", "ingress.yaml", "networkpolicy.yaml", "cilium-networkpolicy.yaml"]);
   const ci = read(".github/workflows/validate.yaml");
   assert.equal((ci.match(/browser-authority-migration-boundary\.test\.mjs/g) ?? []).length, 1);
   for (const release of [".github/workflows/release-dev.yaml", ".github/workflows/promote-prod.yaml"])
