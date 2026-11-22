@@ -174,7 +174,7 @@ def main() -> int:
     if "origin/main...HEAD" in validate:
         raise AssertionError("validate.yaml must not use origin/main as bootstrap diff authority")
 
-    for authority_test in (
+    authority_tests = (
         "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-contract.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-migration-boundary.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/authority-collaborators.test.mjs",
@@ -185,7 +185,9 @@ def main() -> int:
         "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-store.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-store-negative.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-store-numeric-negative.test.mjs",
-    ):
+        "node --test apps/60-services/txo-fabric/webui/browser-authority-004-intent/browser-authority-004-intent.test.mjs",
+    )
+    for authority_test in authority_tests:
         if validate.count(authority_test) != 1:
             raise AssertionError(f"validate.yaml must invoke exactly once: {authority_test}")
     if "browser-authority-contract:\n    if:" in validate or "continue-on-error:" in validate:
