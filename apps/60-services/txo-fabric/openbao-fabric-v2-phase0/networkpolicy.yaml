@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openbao-fabric-v2-private
+  namespace: txo-fabric-system
+  labels:
+    app.kubernetes.io/name: openbao-fabric-v2
+    app.kubernetes.io/component: secret-plane-v2
+    app.kubernetes.io/part-of: txo-fabric
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: openbao-fabric-v2
+      app.kubernetes.io/component: secret-plane-v2
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress: []
