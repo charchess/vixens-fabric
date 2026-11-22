@@ -100,6 +100,11 @@ def main() -> int:
         "Browser authority contract",
         "openfga-runtime-hook-contract:",
         "OpenFGA runtime hook contract",
+        "client0-bootstrap-contract:",
+        "Client0 bootstrap contract",
+        "go test ./internal/controller -run '^TestEvaluateClient0BootstrapEligibility$'",
+        "node --test apps/60-services/txo-fabric/webui/server/authority/client0-bootstrap-ledger.test.mjs",
+        "node --test apps/60-services/txo-fabric/webui/server/authority/client0-ledger-negative.test.mjs",
         "node --test apps/60-services/txo-fabric/openfga/runtime/openfga-runtime-hook.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-contract.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-migration-boundary.test.mjs",
@@ -108,13 +113,15 @@ def main() -> int:
         "node --test apps/60-services/txo-fabric/webui/server/authority/authority-ledger-capability-negative.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/authority-source-adapters.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/authority-source-adapters-negative.test.mjs",
-        "needs: [repository-hygiene, release-channel-invariants, openbao-fabric-contract, browser-authority-contract, openfga-runtime-hook-contract]",
+        "needs: [repository-hygiene, release-channel-invariants, openbao-fabric-contract, browser-authority-contract, openfga-runtime-hook-contract, client0-bootstrap-contract]",
         "OPENBAO_FABRIC_CONTRACT: ${{ needs.openbao-fabric-contract.result }}",
         "BROWSER_AUTHORITY_CONTRACT: ${{ needs.browser-authority-contract.result }}",
         "OPENFGA_RUNTIME_HOOK_CONTRACT: ${{ needs.openfga-runtime-hook-contract.result }}",
+        "CLIENT0_BOOTSTRAP_CONTRACT: ${{ needs.client0-bootstrap-contract.result }}",
         "test \"$OPENBAO_FABRIC_CONTRACT\" = success",
         "test \"$BROWSER_AUTHORITY_CONTRACT\" = success",
         "test \"$OPENFGA_RUNTIME_HOOK_CONTRACT\" = success",
+        "test \"$CLIENT0_BOOTSTRAP_CONTRACT\" = success",
         "node --test tests/test_openbao_bootstrap_reachability_contract.mjs",
     ):
         require(validate, needle, validate_path)
@@ -181,6 +188,17 @@ def main() -> int:
         raise AssertionError("validate.yaml must invoke OpenFGA runtime hook contract exactly once")
     if "openfga-runtime-hook-contract:\n    if:" in validate or "continue-on-error:" in validate:
         raise AssertionError("OpenFGA runtime hook contract must not have a permissive bypass")
+
+    client0_tests = (
+        "go test ./internal/controller -run '^TestEvaluateClient0BootstrapEligibility$'",
+        "node --test apps/60-services/txo-fabric/webui/server/authority/client0-bootstrap-ledger.test.mjs",
+        "node --test apps/60-services/txo-fabric/webui/server/authority/client0-ledger-negative.test.mjs",
+    )
+    for client0_test in client0_tests:
+        if validate.count(client0_test) != 1:
+            raise AssertionError(f"validate.yaml must invoke exactly once: {client0_test}")
+    if "client0-bootstrap-contract:\n    if:" in validate or "continue-on-error:" in validate:
+        raise AssertionError("Client0 bootstrap contract must not have a permissive bypass")
 
     print("release-channel workflow invariants: PASS")
     return 0
