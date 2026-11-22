@@ -103,6 +103,8 @@ def main() -> int:
         "node --test apps/60-services/txo-fabric/webui/server/authority/authority-collaborators.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/authority-collaborators-negative.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/authority-ledger-capability-negative.test.mjs",
+        "node --test apps/60-services/txo-fabric/webui/server/authority/authority-source-adapters.test.mjs",
+        "node --test apps/60-services/txo-fabric/webui/server/authority/authority-source-adapters-negative.test.mjs",
         "needs: [repository-hygiene, release-channel-invariants, openbao-fabric-contract, browser-authority-contract]",
         "OPENBAO_FABRIC_CONTRACT: ${{ needs.openbao-fabric-contract.result }}",
         "BROWSER_AUTHORITY_CONTRACT: ${{ needs.browser-authority-contract.result }}",
@@ -161,6 +163,8 @@ def main() -> int:
         "node --test apps/60-services/txo-fabric/webui/server/authority/authority-collaborators.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/authority-collaborators-negative.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/authority-ledger-capability-negative.test.mjs",
+        "node --test apps/60-services/txo-fabric/webui/server/authority/authority-source-adapters.test.mjs",
+        "node --test apps/60-services/txo-fabric/webui/server/authority/authority-source-adapters-negative.test.mjs",
     ):
         if validate.count(authority_test) != 1:
             raise AssertionError(f"validate.yaml must invoke exactly once: {authority_test}")
