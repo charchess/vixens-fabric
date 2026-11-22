@@ -4,7 +4,6 @@ kind: Kustomization
 resources:
   - external-secrets.yaml
   - database.yaml
-  - migration-job.yaml
   - deployment.yaml
   - service.yaml
   - networkpolicy.yaml

@@ -98,6 +98,9 @@ def main() -> int:
         "OpenBao Fabric contract",
         "browser-authority-contract:",
         "Browser authority contract",
+        "openfga-runtime-hook-contract:",
+        "OpenFGA runtime hook contract",
+        "node --test apps/60-services/txo-fabric/openfga/runtime/openfga-runtime-hook.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-contract.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-migration-boundary.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/authority-collaborators.test.mjs",
@@ -105,11 +108,13 @@ def main() -> int:
         "node --test apps/60-services/txo-fabric/webui/server/authority/authority-ledger-capability-negative.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/authority-source-adapters.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/authority-source-adapters-negative.test.mjs",
-        "needs: [repository-hygiene, release-channel-invariants, openbao-fabric-contract, browser-authority-contract]",
+        "needs: [repository-hygiene, release-channel-invariants, openbao-fabric-contract, browser-authority-contract, openfga-runtime-hook-contract]",
         "OPENBAO_FABRIC_CONTRACT: ${{ needs.openbao-fabric-contract.result }}",
         "BROWSER_AUTHORITY_CONTRACT: ${{ needs.browser-authority-contract.result }}",
+        "OPENFGA_RUNTIME_HOOK_CONTRACT: ${{ needs.openfga-runtime-hook-contract.result }}",
         "test \"$OPENBAO_FABRIC_CONTRACT\" = success",
         "test \"$BROWSER_AUTHORITY_CONTRACT\" = success",
+        "test \"$OPENFGA_RUNTIME_HOOK_CONTRACT\" = success",
         "node --test tests/test_openbao_bootstrap_reachability_contract.mjs",
     ):
         require(validate, needle, validate_path)
@@ -170,6 +175,12 @@ def main() -> int:
             raise AssertionError(f"validate.yaml must invoke exactly once: {authority_test}")
     if "browser-authority-contract:\n    if:" in validate or "continue-on-error:" in validate:
         raise AssertionError("browser authority contract must not have a permissive bypass")
+
+    openfga_test = "node --test apps/60-services/txo-fabric/openfga/runtime/openfga-runtime-hook.test.mjs"
+    if validate.count(openfga_test) != 1:
+        raise AssertionError("validate.yaml must invoke OpenFGA runtime hook contract exactly once")
+    if "openfga-runtime-hook-contract:\n    if:" in validate or "continue-on-error:" in validate:
+        raise AssertionError("OpenFGA runtime hook contract must not have a permissive bypass")
 
     print("release-channel workflow invariants: PASS")
     return 0
