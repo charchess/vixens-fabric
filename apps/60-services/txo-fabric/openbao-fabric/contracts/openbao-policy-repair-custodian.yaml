@@ -5,18 +5,46 @@ metadata:
 spec:
   executable: false
   runtimeCapability: false
-  requiresExistingCustodyIssuer: true
-  refuseWithoutExistingCustodyIssuer: true
+  gitOpsConsumer: false
+  requiresExistingAuthenticatedAuthority: true
+  cannotBootstrapInitialCustodyAlone: true
   cannotUnblockCurrentRuntimeAlone: true
-  policyName: txo-fabric-webui-bff-runtime-eso
-  baseline:
-    attestation: ABSENT_EXISTING_CUSTODY_ISSUER_REQUIRED
-  approvedAdd:
+  fabricImmutablePolicyEnvelope:
+    policyName: txo-fabric-webui-bff-runtime-eso
+    mountPath: fabric
     recordPath: fabric/data/vixens/prod/apps/60-services/txo-fabric/webui-bff
-    capabilities: [read]
-  baselineReturn:
-    required: true
-    attestation: ABSENT_EXISTING_CUSTODY_ISSUER_REQUIRED
+    baseline:
+      attestation: ABSENT_EXISTING_AUTHENTICATED_AUTHORITY_REQUIRED
+    approvedAdd:
+      capabilities: [read]
+      phaseHash: sha256:5e80f44f6342202d29ae0f0c2d2499ae6a79309e99b871934d800db96891acfe
+    requiredRevoke:
+      phaseHash: sha256:71c3e653d4d52e97fadae539e78a62a2b2a3119c2bf0cc5bb5d07461f9eeedd4
+      baselineReturnAttestation: ABSENT_EXISTING_AUTHENTICATED_AUTHORITY_REQUIRED
+  vixensInfraCustodyIssuanceContract:
+    repository: charchess/vixens-infra
+    ref: main
+    authorityRef: ABSENT_EXISTING_AUTHENTICATED_AUTHORITY_REQUIRED
+    issuerContractRef: ABSENT_SEPARATE_VIXENS_INFRA_CONTRACT_REQUIRED
+  electraRecoveryConstraints:
+    identityRef: EXISTING_AUTHENTICATED_ELECTRA_RECOVERY_IDENTITY_REQUIRED
+    delegation:
+      ttlSeconds: 900
+      renewable: false
+      storage: memory-only
+      wrapped: true
+  helperRefusalModel:
+    fixed: true
+    refuseMissingAuthority: true
+    refusePolicyMismatch: true
+    refuseRecordMismatch: true
+    refusePhaseHashMismatch: true
+    refuseTTLAbove900Seconds: true
+    refuseRenewableOrPersistentOrUnwrappedDelegation: true
+  receiptSchema:
+    version: v1
+    allowedFields: [phase, phaseHash, policyName, recordPath, capabilityCategories, custodyAttribution, auditOutcome, revoked]
+    forbiddenFields: [credential, token, wrappedPayload, policyBody, providerPayload, root, share]
   refusedCapabilities:
     - metadata
     - list
@@ -29,6 +57,7 @@ spec:
     - listener
     - auth-method
     - job
+    - ci
     - argo
     - eso
     - runtime
