@@ -121,6 +121,10 @@ jobs:
         run: node --test apps/60-services/txo-fabric/webui/server/authority/authority-collaborators-negative.test.mjs
       - name: Run authority ledger capability negative contract
         run: node --test apps/60-services/txo-fabric/webui/server/authority/authority-ledger-capability-negative.test.mjs
+      - name: Run authority source adapters contract
+        run: node --test apps/60-services/txo-fabric/webui/server/authority/authority-source-adapters.test.mjs
+      - name: Run authority source adapters negative contract
+        run: node --test apps/60-services/txo-fabric/webui/server/authority/authority-source-adapters-negative.test.mjs
 
   validation-summary:
     name: Validation Summary
