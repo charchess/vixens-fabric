@@ -5,18 +5,52 @@ import { spawnSync } from "node:child_process";
 
 const root = new URL("../../../../", import.meta.url);
 const tree = "apps/60-services/txo-fabric/openbao-fabric-v2-phase0";
-const read = file => readFile(new URL(`${tree}/${file}`, root), "utf8");
+const testPath = `${tree}/openbao-fabric-v2-phase0.test.mjs`;
+const command = `node --test ${testPath}`;
+const read = file => readFile(new URL(file, root), "utf8");
 const names = ["openbao-fabric-v2", "openbao-fabric-v2-raft", "openbao-fabric-v2-audit", "openbao-fabric-v2-tls", "txo-fabric-openbao-v2-phase0"];
+const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const workflowReference = new RegExp(`^\\.github/workflows/validate\\.yaml:\\d+:\\s*run:\\s*${escapeRegExp(command)}\\s*$`);
+const releaseTupleReference = new RegExp(`^scripts/test-release-channel\\.py:\\d+:\\s*["']${escapeRegExp(command)}["']\\s*,?\\s*$`);
+const releaseInvariant = new RegExp(`openbao_phase0_tests\\s*=\\s*[\\[(][\\s\\S]*?["']${escapeRegExp(command)}["'][\\s\\S]*?[\\])]\\s*\\n\\s*for openbao_phase0_test in openbao_phase0_tests:\\s*\\n\\s*if validate\\.count\\(openbao_phase0_test\\)\\s*!=\\s*1:`);
 
-function noV2RuntimeSelection() {
+function externalReferences() {
   const scan = spawnSync("git", ["grep", "-n", "openbao-fabric-v2-phase0", "--", `:!${tree}/**`], { cwd: new URL(".", root).pathname, encoding: "utf8" });
-  assert.equal(scan.status, 1, scan.stdout || scan.stderr);
+  assert.ok(scan.status === 0 || scan.status === 1, scan.stderr);
+  return (scan.stdout || "").trim().split("\n").filter(Boolean);
+}
+
+async function assertBoundedExternalReferences() {
+  const references = externalReferences();
+  const workflows = references.filter(reference => workflowReference.test(reference));
+  const releaseTuples = references.filter(reference => releaseTupleReference.test(reference));
+  assert.ok(workflows.length <= 1, `duplicate workflow invocation: ${workflows.join("\n")}`);
+  assert.ok(releaseTuples.length <= 1, `duplicate release tuple: ${releaseTuples.join("\n")}`);
+  for (const reference of references) assert.ok(workflowReference.test(reference) || releaseTupleReference.test(reference), reference);
+  if (releaseTuples.length === 1) assert.match(await read("scripts/test-release-channel.py"), releaseInvariant);
+}
+
+function assertExternalReferenceFixtures() {
+  const workflow = `.github/workflows/validate.yaml:145:        run: ${command}`;
+  const tuple = `scripts/test-release-channel.py:177:        "${command}",`;
+  assert.match(workflow, workflowReference);
+  assert.match(tuple, releaseTupleReference);
+  for (const reference of [
+    `.github/workflows/validate.yaml:145:        run: ${command} --watch`,
+    `.github/workflows/other.yaml:145:        run: ${command}`,
+    `scripts/test-release-channel.py:177:        "${command}" + " --watch",`,
+    `scripts/test-release-channel.py:177:        "${command}", # consumer`,
+    `apps/60-services/txo-fabric/overlays/prod/kustomization.yaml:7:  - ${tree}`,
+  ]) assert.ok(!workflowReference.test(reference) && !releaseTupleReference.test(reference), reference);
+  assert.match(`openbao_phase0_tests = (\n    "${command}",\n)\nfor openbao_phase0_test in openbao_phase0_tests:\n    if validate.count(openbao_phase0_test) != 1:`, releaseInvariant);
+  for (const invariant of [
+    `openbao_phase0_tests = ("${command}",)\nif validate.count("${command}") != 1:`,
+    `openbao_phase0_tests = ("${command}",)\nfor test in openbao_phase0_tests:\n    if validate.count(test) != 1:`,
+  ]) assert.doesNotMatch(invariant, releaseInvariant);
 }
 
 test("Phase 0 v2 replacement tree renders fresh isolated storage and network identities", async () => {
-  const [kustomization, app, raft, audit, statefulset, service, tls, policy] = await Promise.all([
-    read("kustomization.yaml"), read("application-identity.yaml"), read("raft-pvc.yaml"), read("audit-pvc.yaml"), read("statefulset.yaml"), read("service.yaml"), read("tls-reference.yaml"), read("networkpolicy.yaml"),
-  ]);
+  const [kustomization, app, raft, audit, statefulset, service, tls, policy] = await Promise.all(["kustomization.yaml", "application-identity.yaml", "raft-pvc.yaml", "audit-pvc.yaml", "statefulset.yaml", "service.yaml", "tls-reference.yaml", "networkpolicy.yaml"].map(file => read(`${tree}/${file}`)));
   assert.match(kustomization, /resources:\n  - raft-pvc\.yaml\n  - audit-pvc\.yaml\n  - statefulset\.yaml\n  - service\.yaml\n  - networkpolicy\.yaml/);
   assert.doesNotMatch(kustomization, /application-identity|tls-reference/);
   assert.match(app, /kind: OpenBaoFabricV2Phase0ApplicationIdentity/);
@@ -50,9 +84,13 @@ test("Phase 0 v2 replacement tree renders fresh isolated storage and network ide
   for (const value of names) assert.ok([app, raft, audit, statefulset, service, tls, policy].some(file => file.includes(value)), value);
 });
 
+test("Phase 0 permits only bounded future CI and release-invariant references", async () => {
+  assertExternalReferenceFixtures();
+  await assertBoundedExternalReferences();
+});
+
 test("Phase 0 is unselected and refuses v1, client, and bootstrap surfaces", async () => {
-  noV2RuntimeSelection();
-  const files = await Promise.all(["kustomization.yaml", "application-identity.yaml", "raft-pvc.yaml", "audit-pvc.yaml", "statefulset.yaml", "service.yaml", "tls-reference.yaml", "networkpolicy.yaml"].map(read));
+  const files = await Promise.all(["kustomization.yaml", "application-identity.yaml", "raft-pvc.yaml", "audit-pvc.yaml", "statefulset.yaml", "service.yaml", "tls-reference.yaml", "networkpolicy.yaml"].map(file => read(`${tree}/${file}`)));
   const source = files.join("\n");
   for (const forbidden of [/\bopenbao-fabric\b(?!-v2)/, /openbao-fabric-data|openbao-fabric-audit|openbao-fabric-tls/, /ownerReferences:|syncPolicy:|prune:|selfHeal:/, /kind: (Application|Job|ExternalSecret|SecretStore|ClusterSecretStore|Secret|ServiceAccount)/, /serviceAccountName:|automountServiceAccountToken: true/, /\b(auth|kv|eso|consumer|bootstrap)\b/i, /runtimeCapability: true/]) assert.doesNotMatch(source, forbidden);
 });
