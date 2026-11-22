@@ -1,0 +1,34 @@
+apiVersion: custody.truxonline.io/v1alpha1
+kind: OpenBaoPolicyRepairCustodianContract
+metadata:
+  name: openbao-policy-repair-custodian
+spec:
+  executable: false
+  runtimeCapability: false
+  requiresExistingCustodyIssuer: true
+  refuseWithoutExistingCustodyIssuer: true
+  cannotUnblockCurrentRuntimeAlone: true
+  policyName: txo-fabric-webui-bff-runtime-eso
+  baseline:
+    attestation: ABSENT_EXISTING_CUSTODY_ISSUER_REQUIRED
+  approvedAdd:
+    recordPath: fabric/data/vixens/prod/apps/60-services/txo-fabric/webui-bff
+    capabilities: [read]
+  baselineReturn:
+    required: true
+    attestation: ABSENT_EXISTING_CUSTODY_ISSUER_REQUIRED
+  refusedCapabilities:
+    - metadata
+    - list
+    - sibling-read
+    - write
+    - delete
+    - token
+    - root
+    - share
+    - listener
+    - auth-method
+    - job
+    - argo
+    - eso
+    - runtime
