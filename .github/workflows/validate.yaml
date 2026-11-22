@@ -102,6 +102,8 @@ jobs:
         run: node --test apps/60-services/txo-fabric/openbao-fabric/overlays/prod/storage/audit-storage.test.mjs
       - name: Run bootstrap reachability contract
         run: node --test tests/test_openbao_bootstrap_reachability_contract.mjs
+      - name: Run OpenBao Fabric v2 Phase0 custody contract
+        run: node --test apps/60-services/txo-fabric/openbao-fabric-v2-phase0/openbao-fabric-v2-phase0.test.mjs
 
   browser-authority-contract:
     name: Browser authority contract
