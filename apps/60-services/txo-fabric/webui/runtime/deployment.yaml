@@ -62,13 +62,11 @@ spec:
                 secretKeyRef:
                   name: txo-fabric-webui-bff-runtime
                   key: username
-                  optional: true
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:
                   name: txo-fabric-webui-bff-runtime
                   key: password
-                  optional: true
           ports:
             - name: http-private
               containerPort: 3000
