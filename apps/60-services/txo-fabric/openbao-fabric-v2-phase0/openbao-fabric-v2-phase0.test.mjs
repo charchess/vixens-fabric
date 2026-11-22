@@ -12,6 +12,8 @@ const names = ["openbao-fabric-v2", "openbao-fabric-v2-raft", "openbao-fabric-v2
 const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const workflowReference = new RegExp(`^\\.github/workflows/validate\\.yaml:\\d+:\\s*run:\\s*${escapeRegExp(command)}\\s*$`);
 const releaseTupleReference = new RegExp(`^scripts/test-release-channel\\.py:\\d+:\\s*["']${escapeRegExp(command)}["']\\s*,?\\s*$`);
+const phase1Tree = ["openbao-fabric-v2", "phase1"].join("-");
+const phase1HardwareReference = new RegExp(`^apps/60-services/txo-fabric/${phase1Tree}/kustomization\\.yaml:\\d+:\\s*-\\s+\\.\\./openbao-fabric-v2-phase0\\s*$`);
 const releaseInvariant = new RegExp(`openbao_phase0_tests\\s*=\\s*[\\[(][\\s\\S]*?["']${escapeRegExp(command)}["'][\\s\\S]*?[\\])]\\s*\\n\\s*for openbao_phase0_test in openbao_phase0_tests:\\s*\\n\\s*if validate\\.count\\(openbao_phase0_test\\)\\s*!=\\s*1:`);
 
 function externalReferences() {
@@ -24,9 +26,11 @@ async function assertBoundedExternalReferences() {
   const references = externalReferences();
   const workflows = references.filter(reference => workflowReference.test(reference));
   const releaseTuples = references.filter(reference => releaseTupleReference.test(reference));
+  const phase1Hardware = references.filter(reference => phase1HardwareReference.test(reference));
   assert.ok(workflows.length <= 1, `duplicate workflow invocation: ${workflows.join("\n")}`);
   assert.ok(releaseTuples.length <= 1, `duplicate release tuple: ${releaseTuples.join("\n")}`);
-  for (const reference of references) assert.ok(workflowReference.test(reference) || releaseTupleReference.test(reference), reference);
+  assert.equal(phase1Hardware.length, 1, `missing or duplicate Phase 1 hardware boundary: ${phase1Hardware.join("\n")}`);
+  for (const reference of references) assert.ok(workflowReference.test(reference) || releaseTupleReference.test(reference) || phase1HardwareReference.test(reference), reference);
   if (releaseTuples.length === 1) assert.match(await read("scripts/test-release-channel.py"), releaseInvariant);
 }
 
@@ -35,13 +39,16 @@ function assertExternalReferenceFixtures() {
   const tuple = `scripts/test-release-channel.py:177:        "${command}",`;
   assert.match(workflow, workflowReference);
   assert.match(tuple, releaseTupleReference);
+  const phase1 = `apps/60-services/txo-fabric/${phase1Tree}/kustomization.yaml:3:  - ../openbao-fabric-v2-phase0`;
+  assert.match(phase1, phase1HardwareReference);
   for (const reference of [
     `.github/workflows/validate.yaml:145:        run: ${command} --watch`,
     `.github/workflows/other.yaml:145:        run: ${command}`,
     `scripts/test-release-channel.py:177:        "${command}" + " --watch",`,
     `scripts/test-release-channel.py:177:        "${command}", # consumer`,
+    `apps/60-services/txo-fabric/${phase1Tree}/kustomization.yaml:3:  - ../openbao-fabric-v2-phase0/raft-pvc.yaml`,
     `apps/60-services/txo-fabric/overlays/prod/kustomization.yaml:7:  - ${tree}`,
-  ]) assert.ok(!workflowReference.test(reference) && !releaseTupleReference.test(reference), reference);
+  ]) assert.ok(!workflowReference.test(reference) && !releaseTupleReference.test(reference) && !phase1HardwareReference.test(reference), reference);
   assert.match(`openbao_phase0_tests = (\n    "${command}",\n)\nfor openbao_phase0_test in openbao_phase0_tests:\n    if validate.count(openbao_phase0_test) != 1:`, releaseInvariant);
   for (const invariant of [
     `openbao_phase0_tests = ("${command}",)\nif validate.count("${command}") != 1:`,
