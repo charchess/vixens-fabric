@@ -8,6 +8,9 @@ const runtime=new URL("runtime/",webui);
 const target="txo-fabric-webui-bff-runtime";
 const storeName="openbao-fabric-webui-bff-runtime-store";
 const externalSecretName="txo-fabric-webui-bff-runtime-credentials-dedicated";
+const tokenName="txo-fabric-webui-bff-runtime-eso-token";
+const storePath="apps/60-services/txo-fabric/webui/runtime/bff-runtime-credentials.secretstore.yaml";
+const testPath="apps/60-services/txo-fabric/webui/test/bff-runtime-credentials-durability.test.mjs";
 const trimLines=source=>source.trim().split("\n").map(line=>line.trim()).filter(Boolean);
 const expectedStore=[
   "apiVersion: external-secrets.io/v1", "kind: SecretStore", "metadata:", `name: ${storeName}`, "namespace: txo-fabric-system", "spec:", "provider:", "vault:",
@@ -29,12 +32,24 @@ function consumerRefs(source){
   return [...source.matchAll(new RegExp(`- name: (PGUSER|PGPASSWORD)\\n\\s+valueFrom:\\n\\s+secretKeyRef:\\n\\s+name: ${target}\\n\\s+key: (\\w+)(?:\\n\\s+optional: (\\w+))?`,"g"))].map(([,env,key,optional])=>[env,key,optional]);
 }
 
+function assertExclusiveTokenCustody(references){
+  assert.equal(references.length,1);
+  assert.match(references[0],new RegExp(`^${storePath}:\\d+:\\s+name: ${tokenName}$`));
+}
+function tokenReferences(){
+  const scan=spawnSync("git",["grep","-n",tokenName],{cwd:new URL("../../../../",webui).pathname,encoding:"utf8"});
+  assert.ok(scan.status===0||scan.status===1,scan.stderr);
+  return (scan.stdout||"").trim().split("\n").filter(Boolean).filter(reference=>!reference.startsWith(`${testPath}:`));
+}
+
 test("dedicated BFF custody rejects shared-store and producer expansion fixtures",()=>{
   const store=expectedStore.join("\n");
   const externalSecret=expectedExternalSecret.join("\n");
   assert.doesNotThrow(()=>assertClosed(store,expectedStore));
   assert.doesNotThrow(()=>assertClosed(externalSecret,expectedExternalSecret));
   for(const addition of ["  kind: ClusterSecretStore", "  dataFrom: []", "    find: {}", "    extract: {}", "    rewrite: []", "    template: {}", "    generatorRef: {}", "        key: vixens/prod/apps/*", "    name: shared-openbao"]) assert.throws(()=>assertClosed(`${externalSecret}\n${addition}`,expectedExternalSecret));
+  assert.doesNotThrow(()=>assertExclusiveTokenCustody([`${storePath}:15:          name: ${tokenName}`]));
+  for(const unauthorized of [`apps/60-services/txo-fabric/webui/runtime/other-store.yaml:15:          name: ${tokenName}`,`apps/60-services/txo-fabric/webui/runtime/deployment.yaml:80:              secretName: ${tokenName}`]) assert.throws(()=>assertExclusiveTokenCustody([`${storePath}:15:          name: ${tokenName}`,unauthorized]));
 });
 
 test("dedicated BFF custody has one Store, one producer, and one non-optional BFF consumer",()=>{
@@ -43,6 +58,7 @@ test("dedicated BFF custody has one Store, one producer, and one non-optional BF
   const deployment=readFileSync(new URL("deployment.yaml",runtime),"utf8");
   const kustomization=readFileSync(new URL("kustomization.yaml",runtime),"utf8");
   assertClosed(store,expectedStore);
+  assertExclusiveTokenCustody(tokenReferences());
   assertClosed(externalSecret,expectedExternalSecret);
   assert.deepEqual(trimLines(kustomization),["---","apiVersion: kustomize.config.k8s.io/v1beta1","kind: Kustomization","resources:","- serviceaccount.yaml","- bff-runtime-credentials.secretstore.yaml","- bff-runtime-credentials.externalsecret.yaml","- deployment.yaml","- service.yaml","- ingress.yaml","- networkpolicy.yaml","- cilium-networkpolicy.yaml"]);
   assert.deepEqual(consumerRefs(deployment),expectedConsumer);
@@ -63,11 +79,13 @@ test("dedicated BFF custody has one Store, one producer, and one non-optional BF
   assert.equal((render.stdout.match(/^kind: SecretStore$/gm)||[]).length,1);
   assert.equal((render.stdout.match(/kind: ExternalSecret/g)||[]).length,1);
   const documents=render.stdout.split(/^---$/m);
-  const renderedStore=documents.find(document=>/kind: SecretStore\n/.test(document));
-  const renderedExternalSecret=documents.find(document=>/kind: ExternalSecret\n/.test(document));
-  const renderedBff=documents.find(document=>/kind: Deployment\n/.test(document));
+  const renderedStore=documents.find(document=>/^kind: SecretStore\n/m.test(document));
+  const renderedExternalSecret=documents.find(document=>/^kind: ExternalSecret\n/m.test(document));
+  const renderedBff=documents.find(document=>/^kind: Deployment\n/m.test(document));
   assert.ok(renderedStore); assert.ok(renderedExternalSecret); assert.ok(renderedBff);
   assert.match(renderedStore,new RegExp(`name: ${storeName}`));
+  assert.match(renderedStore,new RegExp(`tokenSecretRef:\\n\\s+key: token\\n\\s+name: ${tokenName}`));
+  assert.doesNotMatch(renderedStore,/^(?:data|stringData|binaryData):/m);
   assert.match(renderedExternalSecret,new RegExp(`name: ${externalSecretName}`));
   assert.match(renderedExternalSecret,new RegExp(`name: ${storeName}`));
   const renderedConsumers=[...renderedBff.matchAll(new RegExp(`- name: (PGUSER|PGPASSWORD)\\n\\s+valueFrom:\\n\\s+secretKeyRef:\\n\\s+key: (\\w+)\\n\\s+name: ${target}(?:\\n\\s+optional: (\\w+))?`,"g"))].map(([,env,key,optional])=>[env,key,optional]);
