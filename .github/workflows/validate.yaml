@@ -111,6 +111,17 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24.11.1
+      - name: Verify and install Kustomize v5.4.3 (Linux amd64)
+        run: |
+          set -euo pipefail
+          KUSTOMIZE_VERSION=5.4.3
+          KUSTOMIZE_ARCHIVE="kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
+          KUSTOMIZE_SHA256=3669470b454d865c8184d6bce78df05e977c9aea31c30df3c669317d43bcc7a7
+          curl --fail --silent --show-error --location             "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/v${KUSTOMIZE_VERSION}/${KUSTOMIZE_ARCHIVE}"             -o "${KUSTOMIZE_ARCHIVE}"
+          printf '%s  %s\n' "${KUSTOMIZE_SHA256}" "${KUSTOMIZE_ARCHIVE}" | sha256sum -c -
+          tar -xzf "${KUSTOMIZE_ARCHIVE}" kustomize
+          install -m 0755 kustomize "${RUNNER_TEMP}/kustomize"
+          printf '%s\n' "${RUNNER_TEMP}" >> "$GITHUB_PATH"
       - name: Run browser authority core contract
         run: node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-contract.test.mjs
       - name: Run browser authority migration boundary contract

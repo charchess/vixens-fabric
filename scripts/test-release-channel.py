@@ -193,6 +193,18 @@ def main() -> int:
             raise AssertionError(f"validate.yaml must invoke exactly once: {authority_test}")
     if "browser-authority-contract:\n    if:" in validate or "continue-on-error:" in validate:
         raise AssertionError("browser authority contract must not have a permissive bypass")
+    browser_authority_job = validate.split("  browser-authority-contract:\n", 1)[1].split("  openfga-runtime-hook-contract:\n", 1)[0]
+    require_in_order(
+        browser_authority_job,
+        (
+            "KUSTOMIZE_VERSION=5.4.3",
+            "KUSTOMIZE_SHA256=3669470b454d865c8184d6bce78df05e977c9aea31c30df3c669317d43bcc7a7",
+            "sha256sum -c -",
+            "tar -xzf \"${KUSTOMIZE_ARCHIVE}\" kustomize",
+            "node --test apps/60-services/txo-fabric/webui/test/bff-runtime-credentials-durability.test.mjs",
+        ),
+        validate_path,
+    )
 
     openfga_test = "node --test apps/60-services/txo-fabric/openfga/runtime/openfga-runtime-hook.test.mjs"
     if validate.count(openfga_test) != 1:
