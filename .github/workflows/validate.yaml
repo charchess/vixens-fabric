@@ -146,6 +146,8 @@ jobs:
         run: node --test apps/60-services/txo-fabric/webui/browser-authority-004-intent/browser-authority-004-intent.test.mjs
       - name: Run BFF runtime credentials durability contract
         run: node --test apps/60-services/txo-fabric/webui/test/bff-runtime-credentials-durability.test.mjs
+      - name: Run browser authority production projection gap contract
+        run: node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-production-projection-gap.test.mjs
 
   openfga-runtime-hook-contract:
     name: OpenFGA runtime hook contract
@@ -178,6 +180,9 @@ jobs:
         run: go test ./internal/controller -run '^TestClient0EligibilityFromCanonicalReadSetRejectsAuthorityGaps$'
       - name: Run Client0 eligibility adapter boundary contract
         run: node --test apps/60-services/txo-fabric/operator/internal/controller/client0_eligibility_adapter_boundary.test.mjs
+      - name: Run canonical browser authority operator contracts
+        working-directory: apps/60-services/txo-fabric/operator
+        run: go test ./internal/controller -run '^(TestCanonicalBrowserTenantAuthorityIsCurrentPrivateAndNonSerialized|TestCanonicalBrowserTenantAuthorityRefusesAnyIncompleteOrNoncurrentBundle)$'
 
   validation-summary:
     name: Validation Summary

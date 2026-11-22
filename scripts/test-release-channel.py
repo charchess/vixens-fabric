@@ -187,6 +187,7 @@ def main() -> int:
         "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-store-numeric-negative.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/browser-authority-004-intent/browser-authority-004-intent.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/test/bff-runtime-credentials-durability.test.mjs",
+        "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-production-projection-gap.test.mjs",
     )
     for authority_test in authority_tests:
         if validate.count(authority_test) != 1:
@@ -218,6 +219,7 @@ def main() -> int:
         "node --test apps/60-services/txo-fabric/webui/server/authority/client0-ledger-negative.test.mjs",
         "go test ./internal/controller -run '^TestClient0EligibilityFromCanonicalReadSetRejectsAuthorityGaps$'",
         "node --test apps/60-services/txo-fabric/operator/internal/controller/client0_eligibility_adapter_boundary.test.mjs",
+        "go test ./internal/controller -run '^(TestCanonicalBrowserTenantAuthorityIsCurrentPrivateAndNonSerialized|TestCanonicalBrowserTenantAuthorityRefusesAnyIncompleteOrNoncurrentBundle)$'",
     )
     for client0_test in client0_tests:
         if validate.count(client0_test) != 1:
