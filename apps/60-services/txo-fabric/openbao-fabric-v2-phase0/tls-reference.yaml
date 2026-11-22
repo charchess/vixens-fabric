@@ -1,0 +1,8 @@
+apiVersion: fabric.truxonline.io/v1alpha1
+kind: OpenBaoFabricV2Phase0TLSReference
+metadata:
+  name: openbao-fabric-v2-tls-reference
+spec:
+  executable: false
+  secretName: openbao-fabric-v2-tls
+  required: true

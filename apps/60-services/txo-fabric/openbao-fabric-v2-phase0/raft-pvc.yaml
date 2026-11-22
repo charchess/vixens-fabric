@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openbao-fabric-v2-raft
+  namespace: txo-fabric-system
+  labels:
+    app.kubernetes.io/name: openbao-fabric-v2
+    app.kubernetes.io/component: raft
+    app.kubernetes.io/part-of: txo-fabric
+spec:
+  accessModes: [ReadWriteOnce]
+  volumeMode: Filesystem
+  storageClassName: storage-rwo-retain
+  resources:
+    requests:
+      storage: 5Gi

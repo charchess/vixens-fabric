@@ -1,0 +1,9 @@
+apiVersion: fabric.truxonline.io/v1alpha1
+kind: OpenBaoFabricV2Phase0ApplicationIdentity
+metadata:
+  name: txo-fabric-openbao-v2-phase0
+spec:
+  executable: false
+  gitOpsSelected: false
+  applicationName: txo-fabric-openbao-v2-phase0
+  sourceTree: openbao-fabric-v2-phase0
