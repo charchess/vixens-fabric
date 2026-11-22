@@ -60,6 +60,12 @@ type HumanWebAccessSpec struct {
 	// +listType=set
 	IAMGroups []string `json:"iamGroups,omitempty"`
 
+	// Client0BootstrapGroupRef names one declared IAMGroups entry eligible for
+	// server-side Client0 bootstrap evaluation; it never carries membership.
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	Client0BootstrapGroupRef string `json:"client0BootstrapGroupRef,omitempty"`
+
 	OIDC HumanAccessOIDCSpec `json:"oidc"`
 }
 
