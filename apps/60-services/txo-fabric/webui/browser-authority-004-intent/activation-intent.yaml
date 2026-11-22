@@ -1,0 +1,18 @@
+apiVersion: fabric.truxonline.io/v1alpha1
+kind: BrowserAuthority004ActivationIntent
+metadata:
+  name: browser-authority-004
+spec:
+  executable: false
+  renderRefusal: true
+  namespace: txo-fabric-system
+  databaseProfileRef: postgresql-shared
+  migrationSource: ../db/migrations/004_fabric_browser_authority.sql
+  migrationDigest: ABSENT_EXTERNAL_CONTRACT_REQUIRED
+  networkPolicyReference: ../runtime/networkpolicy.yaml
+  credentialReference: ABSENT_EXTERNAL_CONTRACT_REQUIRED
+  databaseRole: ABSENT_EXTERNAL_CONTRACT_REQUIRED
+  activationAuthority: ABSENT_EXTERNAL_CONTRACT_REQUIRED
+  gates:
+    browserEnabled: false
+    privateBridgeEnabled: false
