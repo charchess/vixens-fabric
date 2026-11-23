@@ -190,10 +190,18 @@ jobs:
         working-directory: apps/60-services/txo-fabric/operator
         run: go test ./internal/controller -run '^(TestCanonicalBrowserTenantAuthorityIsCurrentPrivateAndNonSerialized|TestCanonicalBrowserTenantAuthorityRefusesAnyIncompleteOrNoncurrentBundle)$'
 
+  fabrik-public-bff-route-contract:
+    name: Fabrik public BFF route contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Run Fabrik public BFF route contract
+        run: python3 -m unittest apps/60-services/txo-fabric/webui/test/test_fabrik_public_bff_route.py
+
   validation-summary:
     name: Validation Summary
     if: always()
-    needs: [repository-hygiene, release-channel-invariants, openbao-fabric-contract, browser-authority-contract, openfga-runtime-hook-contract, client0-bootstrap-contract]
+    needs: [repository-hygiene, release-channel-invariants, openbao-fabric-contract, browser-authority-contract, openfga-runtime-hook-contract, client0-bootstrap-contract, fabrik-public-bff-route-contract]
     runs-on: ubuntu-latest
     steps:
       - name: Fail closed on a non-success prerequisite
@@ -204,6 +212,7 @@ jobs:
           BROWSER_AUTHORITY_CONTRACT: ${{ needs.browser-authority-contract.result }}
           OPENFGA_RUNTIME_HOOK_CONTRACT: ${{ needs.openfga-runtime-hook-contract.result }}
           CLIENT0_BOOTSTRAP_CONTRACT: ${{ needs.client0-bootstrap-contract.result }}
+          FABRIK_PUBLIC_BFF_ROUTE_CONTRACT: ${{ needs.fabrik-public-bff-route-contract.result }}
         run: |
           test "$HYGIENE" = success
           test "$RELEASE_CHANNEL" = success
@@ -211,3 +220,4 @@ jobs:
           test "$BROWSER_AUTHORITY_CONTRACT" = success
           test "$OPENFGA_RUNTIME_HOOK_CONTRACT" = success
           test "$CLIENT0_BOOTSTRAP_CONTRACT" = success
+          test "$FABRIK_PUBLIC_BFF_ROUTE_CONTRACT" = success

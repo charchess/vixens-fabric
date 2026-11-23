@@ -118,7 +118,7 @@ def main() -> int:
         "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-store.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-store-negative.test.mjs",
         "node --test apps/60-services/txo-fabric/webui/server/authority/browser-authority-store-numeric-negative.test.mjs",
-        "needs: [repository-hygiene, release-channel-invariants, openbao-fabric-contract, browser-authority-contract, openfga-runtime-hook-contract, client0-bootstrap-contract]",
+        "needs: [repository-hygiene, release-channel-invariants, openbao-fabric-contract, browser-authority-contract, openfga-runtime-hook-contract, client0-bootstrap-contract, fabrik-public-bff-route-contract]",
         "OPENBAO_FABRIC_CONTRACT: ${{ needs.openbao-fabric-contract.result }}",
         "BROWSER_AUTHORITY_CONTRACT: ${{ needs.browser-authority-contract.result }}",
         "OPENFGA_RUNTIME_HOOK_CONTRACT: ${{ needs.openfga-runtime-hook-contract.result }}",
@@ -277,6 +277,20 @@ def main() -> int:
             raise AssertionError(f"validate.yaml must invoke exactly once: {client0_test}")
     if "client0-bootstrap-contract:\n    if:" in validate or "continue-on-error:" in validate:
         raise AssertionError("Client0 bootstrap contract must not have a permissive bypass")
+
+    public_route_test = "python3 -m unittest apps/60-services/txo-fabric/webui/test/test_fabrik_public_bff_route.py"
+    if validate.count(public_route_test) != 1:
+        raise AssertionError("validate.yaml must invoke Fabrik public BFF route contract exactly once")
+    for required in (
+        "fabrik-public-bff-route-contract:",
+        "Fabrik public BFF route contract",
+        "fabrik-public-bff-route-contract]",
+        "FABRIK_PUBLIC_BFF_ROUTE_CONTRACT: ${{ needs.fabrik-public-bff-route-contract.result }}",
+        "test \"$FABRIK_PUBLIC_BFF_ROUTE_CONTRACT\" = success",
+    ):
+        require(validate, required, validate_path)
+    if "fabrik-public-bff-route-contract:\n    if:" in validate or "continue-on-error:" in validate:
+        raise AssertionError("Fabrik public BFF route contract must not have a permissive bypass")
 
     print("release-channel workflow invariants: PASS")
     return 0
