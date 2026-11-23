@@ -1,0 +1,27 @@
+apiVersion: custody.truxonline.io/v1alpha1
+kind: OpenBaoFabricV2Phase2CustodyBootstrapContract
+metadata:
+  name: openbao-fabric-v2-phase2-custody-bootstrap
+spec:
+  executable: false
+  runtimeCapability: false
+  gitOpsConsumer: false
+  phase1Selected: false
+  requiresExistingAuthenticatedAuthority: true
+  cannotBootstrapInitialCustodyAlone: true
+  cannotUnblockCurrentRuntimeAlone: true
+  policyEnvelopeIdentity:
+    policyName: txo-fabric-webui-bff-runtime-eso
+    mountPath: fabric
+    recordPath: fabric/data/vixens/prod/apps/60-services/txo-fabric/webui-bff
+    baselineAttestation: ABSENT_EXISTING_AUTHENTICATED_AUTHORITY_REQUIRED
+    approvedTransientCapabilities: [read]
+  custodyIssuanceReference:
+    repository: charchess/vixens-infra
+    ref: main
+    issuerContractRef: ABSENT_SEPARATE_VIXENS_INFRA_CONTRACT_REQUIRED
+  receiptSchema:
+    version: v1
+    allowedFields: [phase, phaseHash, policyName, recordPath, capabilityCategories, custodyAttribution, auditOutcome, revoked]
+    forbiddenFields: [credential, token, wrappedPayload, policyBody, providerPayload, root, share]
+  refusedCapabilities: [auth, kv, eso, listener, network, record, bff, bridge, client, bootstrap, secret, serviceaccount, job, cronjob, application, runtime]
