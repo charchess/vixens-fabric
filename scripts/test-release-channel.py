@@ -169,6 +169,57 @@ def main() -> int:
         ),
         validate_path,
     )
+    openbao_phase0_tests = (
+        "node --test apps/60-services/txo-fabric/openbao-fabric-v2-phase0/openbao-fabric-v2-phase0.test.mjs",
+    )
+    for openbao_phase0_test in openbao_phase0_tests:
+        if validate.count(openbao_phase0_test) != 1:
+            raise AssertionError(f"validate.yaml must invoke exactly once: {openbao_phase0_test}")
+    openbao_phase1_tests = (
+        "node --test apps/60-services/txo-fabric/openbao-fabric-v2-phase1/openbao-fabric-v2-phase1.test.mjs",
+    )
+    for openbao_phase1_test in openbao_phase1_tests:
+        if validate.count(openbao_phase1_test) != 1:
+            raise AssertionError(f"validate.yaml must invoke exactly once: {openbao_phase1_test}")
+    openbao_phase2_tests = (
+        "node --test tests/test_openbao_fabric_v2_phase2_custody_bootstrap_contract.mjs",
+    )
+    for openbao_phase2_test in openbao_phase2_tests:
+        if validate.count(openbao_phase2_test) != 1:
+            raise AssertionError(f"validate.yaml must invoke exactly once: {openbao_phase2_test}")
+    openbao_fabric_job = validate.split("  openbao-fabric-contract:\n", 1)[1].split("  browser-authority-contract:\n", 1)[0]
+    if "openbao-fabric-contract:\n    if:" in validate or "continue-on-error:" in openbao_fabric_job:
+        raise AssertionError("OpenBao Fabric contract must not have a permissive bypass")
+    require_in_order(
+        openbao_fabric_job,
+        (
+            "KUSTOMIZE_SHA256=3669470b454d865c8184d6bce78df05e977c9aea31c30df3c669317d43bcc7a7",
+            "sha256sum -c -",
+            "tar -xzf \"${KUSTOMIZE_ARCHIVE}\" kustomize",
+            openbao_phase2_tests[0],
+        ),
+        validate_path,
+    )
+    require_in_order(
+        openbao_fabric_job,
+        (
+            "KUSTOMIZE_SHA256=3669470b454d865c8184d6bce78df05e977c9aea31c30df3c669317d43bcc7a7",
+            "sha256sum -c -",
+            "tar -xzf \"${KUSTOMIZE_ARCHIVE}\" kustomize",
+            openbao_phase1_tests[0],
+        ),
+        validate_path,
+    )
+    require_in_order(
+        openbao_fabric_job,
+        (
+            "KUSTOMIZE_SHA256=3669470b454d865c8184d6bce78df05e977c9aea31c30df3c669317d43bcc7a7",
+            "sha256sum -c -",
+            "tar -xzf \"${KUSTOMIZE_ARCHIVE}\" kustomize",
+            openbao_phase0_tests[0],
+        ),
+        validate_path,
+    )
     if "if test -f tests/test_openbao_bootstrap_reachability_contract.mjs; then" in validate:
         raise AssertionError("validate.yaml must not retain the optional bootstrap execution path")
     if "origin/main...HEAD" in validate:

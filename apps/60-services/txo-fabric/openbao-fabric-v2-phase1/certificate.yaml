@@ -1,0 +1,77 @@
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: openbao-fabric-v2-selfsigned
+  namespace: txo-fabric-system
+  labels:
+    app.kubernetes.io/name: openbao-fabric-v2
+    app.kubernetes.io/component: secret-plane-v2
+    app.kubernetes.io/part-of: txo-fabric
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: openbao-fabric-v2-ca
+  namespace: txo-fabric-system
+  labels:
+    app.kubernetes.io/name: openbao-fabric-v2
+    app.kubernetes.io/component: secret-plane-v2
+    app.kubernetes.io/part-of: txo-fabric
+spec:
+  secretName: openbao-fabric-v2-ca
+  isCA: true
+  commonName: openbao-fabric-v2-ca
+  duration: 8760h
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages: [cert sign, crl sign]
+  issuerRef:
+    name: openbao-fabric-v2-selfsigned
+    kind: Issuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: openbao-fabric-v2-ca-issuer
+  namespace: txo-fabric-system
+  labels:
+    app.kubernetes.io/name: openbao-fabric-v2
+    app.kubernetes.io/component: secret-plane-v2
+    app.kubernetes.io/part-of: txo-fabric
+spec:
+  ca:
+    secretName: openbao-fabric-v2-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: openbao-fabric-v2-tls
+  namespace: txo-fabric-system
+  labels:
+    app.kubernetes.io/name: openbao-fabric-v2
+    app.kubernetes.io/component: secret-plane-v2
+    app.kubernetes.io/part-of: txo-fabric
+spec:
+  secretName: openbao-fabric-v2-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages: [digital signature, server auth]
+  dnsNames:
+    - openbao-fabric-v2
+    - openbao-fabric-v2.txo-fabric-system
+    - openbao-fabric-v2.txo-fabric-system.svc
+    - openbao-fabric-v2.txo-fabric-system.svc.cluster.local
+  issuerRef:
+    name: openbao-fabric-v2-ca-issuer
+    kind: Issuer
+    group: cert-manager.io

@@ -1,0 +1,32 @@
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: config
+    configMap:
+      name: openbao-fabric-v2-config
+- op: add
+  path: /spec/template/spec/containers/0/command
+  value: ["/usr/bin/bao"]
+- op: add
+  path: /spec/template/spec/containers/0/args
+  value: ["server", "-config=/openbao/config/server.hcl"]
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value:
+    name: config
+    mountPath: /openbao/config
+    readOnly: true
+- op: add
+  path: /spec/template/spec/containers/0/readinessProbe
+  value:
+    tcpSocket:
+      port: 8200
+    initialDelaySeconds: 5
+    periodSeconds: 10
+- op: add
+  path: /spec/template/spec/containers/0/livenessProbe
+  value:
+    tcpSocket:
+      port: 8200
+    initialDelaySeconds: 15
+    periodSeconds: 20
