@@ -11,12 +11,12 @@ class FabrikPublicBffRouteTests(unittest.TestCase):
         self.assertEqual(doc["kind"], "Ingress")
         self.assertEqual(doc["metadata"]["name"], "txo-fabric-webui-bff")
         self.assertEqual(doc["metadata"]["annotations"], {"cert-manager.io/cluster-issuer": "letsencrypt-prod", "external-dns.alpha.kubernetes.io/public": "true", "external-dns.alpha.kubernetes.io/target": "truxonline.com"})
-        rules = doc["spec"]["rules"]
-        public = [rule for rule in rules if rule["host"] == "fabrik.truxonline.com"]
-        self.assertEqual(len(public), 1)
-        path = public[0]["http"]["paths"]
-        self.assertEqual(path, [{"path": "/", "pathType": "Prefix", "backend": {"service": {"name": "txo-fabric-webui-bff", "port": {"number": 3000}}}}])
-        self.assertIn("fabrik.truxonline.com", doc["spec"]["tls"][0]["hosts"])
+        expected_rules = [
+            {"host": host, "http": {"paths": [{"path": "/", "pathType": "Prefix", "backend": {"service": {"name": "txo-fabric-webui-bff", "port": {"number": 3000}}}}]}}
+            for host in ("fabric.truxonline.com", "fabrik.truxonline.com")
+        ]
+        self.assertEqual(doc["spec"]["rules"], expected_rules)
+        self.assertEqual(doc["spec"]["tls"], [{"hosts": ["fabric.truxonline.com", "fabrik.truxonline.com"], "secretName": "txo-fabric-webui-bff-tls"}])
         self.assertEqual(doc["spec"]["ingressClassName"], "traefik")
 
 if __name__ == "__main__":
