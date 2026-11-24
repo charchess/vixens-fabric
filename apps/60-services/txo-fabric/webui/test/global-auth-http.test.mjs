@@ -5,12 +5,18 @@ import {
 } from "node:crypto";
 import { createGlobalOIDCLogin } from "../server/global-oidc-login.mjs";
 import { createGlobalAuthHttp, createGlobalWebUIApp } from "../server/global-auth-http.mjs";
+import { createMvpIdentityBinding } from "../server/mvp-identity-binding.mjs";
 
 const origin = "https://fabric.truxonline.com";
 const idp = "https://authentik.truxonline.com";
 const issuer = idp + "/application/o/txo-fabric-webui/";
 const userUUID = "00000000-0000-4000-8000-000000000001";
 const sub = "opaque-global-subject-987";
+const mvpBindings = Object.freeze([Object.freeze({
+  issuer, oidcSubject: sub, authentikUserUUID: userUUID,
+  fabricUserId: "usr" + "d".repeat(32), tenantKey: "hairem",
+  fabricTenantId: "TEN00001", requiredGroup: "hairem/admin",
+})]);
 const now = 1_797_000_000_000;
 const nonceHash = s => createHash("sha256").update(s).digest("base64url");
 const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -91,6 +97,7 @@ function setup({ tokenOverrides = {}, active = true, tokenStatus = 200, tenantPr
   };
   const auth = createGlobalAuthHttp({
     expectedOrigin: origin, login, sessions: store,
+    identityBinding: createMvpIdentityBinding({ bindings: mvpBindings }),
     verifyActiveHuman: async proof => ({
       ...proof, accountActive: live, fresh: true,
     }),
@@ -238,6 +245,7 @@ test("composed global BFF authenticates once and rechecks all tenant memberships
   const app = createGlobalWebUIApp({
     expectedOrigin: origin, authentikOrigin: idp,
     transactions: h.transactions, sessions: h.store,
+    identityBindings: mvpBindings,
     verifyActiveHuman: async proof => ({ ...proof, accountActive: true, fresh: true }),
     listTenantCatalog: async () => [{ tenantKey:"hairem", fabricTenantId:"TEN00001", displayName:"hAIrem" }],
     resolveTenantAccess: async ({ tenantKey, fabricTenantId }) => {
@@ -334,4 +342,32 @@ test("tenant proof callback uses the global session cookie server-side and never
   assert.equal(response.headers.get("location"), origin + "/");
   assert.equal(response.headers.get("set-cookie"), "__Host-txo-fabric-oidc=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax");
   assert.deepEqual(completions, [{ state: "S".repeat(43), code: "server-code", browserCookieValue: "C".repeat(43), globalSessionBinding: session.token }]);
+});
+
+test("legacy or unrecognized durable sessions are denied before catalog, chat, or enrollment", async () => {
+  const h = setup();
+  let accessCalls = 0, catalogCalls = 0;
+  const app = createGlobalWebUIApp({
+    expectedOrigin: origin, authentikOrigin: idp, transactions: h.transactions,
+    sessions: h.store, identityBindings: mvpBindings,
+    verifyActiveHuman: async proof => ({ ...proof, accountActive: true, fresh: true }),
+    listTenantCatalog: async () => { catalogCalls++; return []; },
+    resolveTenantAccess: async () => { accessCalls++; return null; },
+    getTenantChat: async () => { throw Error("must not resolve chat"); },
+    fetchImpl: async () => { throw Error("must not call IdP"); }, now: () => now,
+    enrollTenant: async () => { throw Error("must not enroll"); },
+  });
+  const token = "L".repeat(43);
+  h.sessions.set(token, {
+    authenticated: true, verified: true, issuer,
+    oidcSubject: "legacy-unrecognized-subject", authentikUserUUID: userUUID,
+  });
+  const cookie = { Cookie: "__Host-txo-fabric-session=" + token };
+  assert.equal(await h.auth.authenticate(new Request(origin + "/api/me", { headers: cookie })), null);
+  assert.equal((await app(new Request(origin + "/api/tenants/hairem/chat/agents", { headers: cookie }))).status, 403);
+  assert.equal((await app(new Request(origin + "/api/tenants/hairem/enroll", {
+    method: "POST", headers: { ...cookie, Origin: origin, "X-TXO-Request": "enroll" },
+  }))).status, 403);
+  assert.equal(catalogCalls, 0);
+  assert.equal(accessCalls, 0);
 });

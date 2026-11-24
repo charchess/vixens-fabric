@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Fail-closed MVP identity binding for the Fabric global BFF",
+  "requiredAuthoritativeFields": [
+    "issuer",
+    "oidcSubject",
+    "authentikUserUUID",
+    "fabricUserId",
+    "tenantKey",
+    "fabricTenantId",
+    "requiredGroup"
+  ],
+  "requiredFixedValues": {
+    "tenantKey": "hairem",
+    "fabricTenantId": "TEN00001",
+    "requiredGroup": "hairem/admin"
+  },
+  "bindings": []
+}
