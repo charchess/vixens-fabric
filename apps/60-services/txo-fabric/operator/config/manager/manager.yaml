@@ -61,10 +61,9 @@ spec:
             # unlisted tenant stays fail-closed even while the global gate is on.
             - name: TXO_FABRIC_OPENFGA_TENANT_ALLOWLIST
               value: "hairem"
-            # Explicitly OFF: only a later approved GitOps change may
-            # enable the workload-authenticated private identity listener.
+            # Authorized MVP activation of the workload-authenticated private identity listener.
             - name: TXO_FABRIC_PRIVATE_BRIDGE_ENABLED
-              value: "false"
+              value: "true"
             - name: TXO_FABRIC_PRIVATE_BRIDGE_K8S_ISSUER
               value: ""
             - name: TXO_FABRIC_PRIVATE_BRIDGE_HMAC_KEY

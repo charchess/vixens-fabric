@@ -65,8 +65,8 @@ test("dedicated BFF custody has one Store, one producer, and one non-optional BF
   assert.doesNotMatch(deployment,/\benvFrom:/);
   assert.doesNotMatch(deployment,new RegExp(`secretName: ${target}`));
   assert.doesNotMatch(deployment,/- name: (?:PGUSER|PGPASSWORD)\n\s+value:/);
-  assert.match(deployment,/name: TXO_WEBUI_BFF_BROWSER_ENABLED\s+value: "false"/);
-  assert.match(deployment,/name: TXO_FABRIC_PRIVATE_BRIDGE_ENABLED\s+value: "false"/);
+  assert.match(deployment,/name: TXO_WEBUI_BFF_BROWSER_ENABLED\s+value: "true"/);
+  assert.match(deployment,/name: TXO_FABRIC_PRIVATE_BRIDGE_ENABLED\s+value: "true"/);
   const active= readdirSync(runtime).filter(name=>name.endsWith(".yaml")).flatMap(name=>{
     const source=readFileSync(new URL(name,runtime),"utf8");
     return [...source.matchAll(new RegExp(`^\\s+name: (?:${storeName}|${externalSecretName}|${target})$`,"gm"))].map(match=>[name,match[0].trim().replace(/^name: /,"")]);

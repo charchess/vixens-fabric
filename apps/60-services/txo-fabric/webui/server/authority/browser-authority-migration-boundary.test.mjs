@@ -53,8 +53,8 @@ test("startup and delivery roots have no migration selector", () => {
     assert.doesNotMatch(read(release), /\b(?:kubectl|helm|kustomize|psql)\b/);
 });
 
-test("browser and bridge gates remain disabled", () => {
+test("browser and bridge gates are jointly enabled for the authorized MVP", () => {
   const deployment = read("apps/60-services/txo-fabric/webui/runtime/deployment.yaml");
-  assert.match(deployment, /TXO_WEBUI_BFF_BROWSER_ENABLED\n\s+value: "false"/);
-  assert.match(deployment, /TXO_FABRIC_PRIVATE_BRIDGE_ENABLED\n\s+value: "false"/);
+  assert.match(deployment, /TXO_WEBUI_BFF_BROWSER_ENABLED\n\s+value: "true"/);
+  assert.match(deployment, /TXO_FABRIC_PRIVATE_BRIDGE_ENABLED\n\s+value: "true"/);
 });
