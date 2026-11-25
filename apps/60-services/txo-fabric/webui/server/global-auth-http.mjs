@@ -2,6 +2,7 @@ import { createGlobalOIDCLogin, GLOBAL_OIDC_BINDING_COOKIE } from "./global-oidc
 import { createFabricOIDCLogin } from "./oidc-login.mjs";
 import { createGlobalWebUIHandler } from "./global-webui-http.mjs";
 import { createMvpCatalogBoundary } from "./mvp-catalog-boundary.mjs";
+import { createMvpIdentityBinding } from "./mvp-identity-binding.mjs";
 
 const SESSION_COOKIE = "__Host-txo-fabric-session";
 const AUTH_REQUEST = "auth";
@@ -52,14 +53,14 @@ const denied = (status = 403) => new Response("Access denied", { status, headers
  * TLS ingress, CNPG migrations and NetworkPolicy are installed.
  */
 export function createGlobalAuthHttp({
-  expectedOrigin, login, sessions, verifyActiveHuman, tenantProofs,
+  expectedOrigin, login, sessions, verifyActiveHuman, identityBinding, tenantProofs,
 }) {
   if (typeof expectedOrigin !== "string" || !/^https:\/\/[^/?#]+$/.test(expectedOrigin) ||
       typeof login?.begin !== "function" || typeof login?.complete !== "function" ||
       typeof sessions?.issue !== "function" ||
       typeof sessions?.authenticate !== "function" ||
       typeof sessions?.revoke !== "function" ||
-      typeof verifyActiveHuman !== "function" ||
+      typeof verifyActiveHuman !== "function" || typeof identityBinding?.recognize !== "function" ||
       (tenantProofs !== undefined && (!tenantProofs || typeof tenantProofs !== "object" || Array.isArray(tenantProofs) ||
         Object.keys(tenantProofs).some((key) => key !== "hairem") ||
         Object.values(tenantProofs).some((proof) => typeof proof?.begin !== "function" || typeof proof?.complete !== "function")))) fail();
@@ -67,7 +68,9 @@ export function createGlobalAuthHttp({
   async function authenticate(request) {
     const token = cookieValue(request, SESSION_COOKIE);
     if (!token) return null;
-    return sessions.authenticate(token);
+    // Every durable cookie is re-recognized. A legacy or stale session never
+    // becomes a BFF principal merely because its signature remains valid.
+    return identityBinding.recognize(await sessions.authenticate(token));
   }
 
   async function handle(request) {
@@ -131,6 +134,10 @@ export function createGlobalAuthHttp({
             live.oidcSubject !== proof.oidcSubject ||
             live.authentikUserUUID !== proof.authentikUserUUID) fail();
 
+        const recognized = identityBinding.recognize(Object.freeze({
+          authenticated: true, verified: true, ...proof,
+        }));
+        if (!recognized) fail();
         const session = await sessions.issue(proof);
         if (!BASE64URL43.test(session?.token || "") ||
             !Number.isSafeInteger(session.maxAge) ||
@@ -151,9 +158,8 @@ export function createGlobalAuthHttp({
       try {
         const binding = cookieValue(request, SESSION_COOKIE);
         if (!binding) return denied();
-        const identity = await sessions.authenticate(binding);
-        if (!identity || identity.authenticated !== true || identity.verified !== true ||
-            !OIDC_SUB.test(identity.oidcSubject || "") || !UUID.test(identity.authentikUserUUID || "")) return denied();
+        const identity = await authenticate(request);
+        if (!identity || identity.tenantKey !== "hairem" || identity.requiredGroup !== "hairem/admin") return denied();
         const started = await tenantProofs.hairem.begin({ globalSessionBinding: binding });
         const authorizationURL = new URL(started?.authorizationURL);
         const cookie = started?.browserCookie;
@@ -215,8 +221,9 @@ export function createGlobalWebUIApp({
   expectedOrigin, authentikOrigin, transactions, sessions,
   verifyActiveHuman, listTenantCatalog, resolveTenantAccess,
   getTenantChat, browserArtifacts, resolvePlatformAccess, enrollTenant,
-  fetchImpl = fetch, now = () => Date.now(),
+  identityBindings, fetchImpl = fetch, now = () => Date.now(),
 }) {
+  const identityBinding = createMvpIdentityBinding({ bindings: identityBindings });
   const login = createGlobalOIDCLogin({
     expectedOrigin, authentikOrigin, transactions, fetchImpl, now,
   });
@@ -228,13 +235,14 @@ export function createGlobalWebUIApp({
       domainSuffix: "truxonline.com",
       redirectURI: expectedOrigin + "/auth/tenants/hairem/callback",
       authentikOrigin, transactions,
-      resolveGlobalSession: sessions.authenticate.bind(sessions),
+      resolveGlobalSession: async (binding) =>
+        identityBinding.recognize(await sessions.authenticate(binding)),
       enrollVerifiedHuman: enrollTenant,
       fetchImpl, now,
     }),
   }) : undefined;
   const auth = createGlobalAuthHttp({
-    expectedOrigin, login, sessions, verifyActiveHuman, tenantProofs,
+    expectedOrigin, login, sessions, verifyActiveHuman, identityBinding, tenantProofs,
   });
   // The MVP publishes exactly one reviewed tenant and the 13 canonical
   // AgentIdentity keys. Membership/FGA remains revalidated downstream.

@@ -99,7 +99,10 @@ export function createFabricOIDCLogin({
       typeof fetchImpl !== "function" || typeof now !== "function") deny();
   const verifyLoginIDToken = createAuthentikIdentityVerifier({
     tenantKey, issuer, clientId, fetchImpl, now,
-    ...(tenantKey === "hairem" ? {
+    ...(tenantKey === "hairem" && !endpoints.fabricCallback ? {
+      // Legacy per-tenant callback compatibility remains isolated from the
+      // global Fabric origin. The global flow is bound by the injected MVP
+      // recognizer and does not carry any source-embedded principal fallback.
       expectedAuthentikUserUUID: "048248d9-5dce-427a-8585-960d34ef35ec",
       expectedAuthentikSubject: "charchess",
       requiredGroup: "txo-fabric-hairem-client0",
