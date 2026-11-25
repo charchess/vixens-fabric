@@ -324,7 +324,7 @@ test("abort propagates to Hermes fetch, without DELETE, resume or replay", async
   assert.equal(calls,1);
 });
 
-test("stateless service never requires BFF SQL or changes selected production", async () => {
+test("stateless service does not require BFF SQL or alter the reviewed MVP activation", async () => {
   const h = harness({ repo: new Proxy({}, {get(){throw Error("BFF repo must never be consulted");}}) });
   await collect(h.service.turn({principal,agentKey:"alex",input:"hello"}));
   const doc = path => readFileSync(new URL(path, import.meta.url),"utf8");
@@ -333,8 +333,8 @@ test("stateless service never requires BFF SQL or changes selected production", 
   const bootstrap = doc("../bootstrap/migrate-job.yaml");
   const prod = doc("../../overlays/prod/kustomization.yaml");
   const bff = doc("../server/private-bff-main.mjs");
-  assert.match(deployment,/name: TXO_WEBUI_BFF_BROWSER_ENABLED\s+value: "false"/);
-  assert.match(operator,/name: TXO_FABRIC_PRIVATE_BRIDGE_ENABLED\s+value: "false"/);
+  assert.match(deployment,/name: TXO_WEBUI_BFF_BROWSER_ENABLED\s+value: "true"/);
+  assert.match(operator,/name: TXO_FABRIC_PRIVATE_BRIDGE_ENABLED\s+value: "true"/);
   assert.doesNotMatch(bootstrap,/003_fabric_chat_threads/);
   assert.doesNotMatch(prod,/hermes-api-|003_fabric_chat_threads/);
   assert.doesNotMatch(bff,/createPrivateHermesResponsesService|hermes-responses/);
