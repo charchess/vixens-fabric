@@ -34,15 +34,19 @@ test("BFF, ingress and global OIDC use fabric.truxonline.com as the exact public
   assert.match(vite, /sourcemap: false/);
 });
 
-test("production overlay renders BFF private workload, never credential/bootstrap activation", () => {
+test("production overlay composes CNPG database and BFF runtime without bootstrap credentials or migration", () => {
   const overlay = read("../overlays/prod/kustomization.yaml");
   const root = read("kustomization.yaml");
   const runtime = read("runtime/kustomization.yaml");
   assert.match(overlay, /^  - \.\.\/\.\.\/webui$/m);
   assert.doesNotMatch(overlay, /webui\/bootstrap/);
   assert.match(root, /^  - runtime$/m);
+  assert.match(root, /^  - bootstrap\/database\.yaml$/m);
+  assert.doesNotMatch(root, /^  - bootstrap\/credentials\.yaml$/m);
+  assert.doesNotMatch(root, /^  - bootstrap\/migrate-job\.yaml$/m);
   assert.match(root, /db\/migrations\/001_oidc_login_transactions.sql/);
   assert.match(root, /db\/migrations\/002_global_browser_sessions.sql/);
+  assert.match(runtime, /^  - bff-runtime-credentials\.externalsecret\.yaml$/m);
   assert.match(runtime, /^  - ingress\.yaml$/m);
   assert.match(runtime, /^  - cilium-networkpolicy\.yaml$/m);
   assert.doesNotMatch(root, /^  - bootstrap$/m);
