@@ -1,11 +1,12 @@
 ---
-# Active production slice: private BFF health-only workload + immutable SQL
-# source snapshot. DB/secret bootstrap in bootstrap/ is deliberately NOT
-# included; it must be reviewed/activated separately with credentials.
+# Active production slice: private BFF runtime plus the CNPG role/database
+# declarations. Credential projection and migration execution remain out of this
+# Kustomization and retain their separate review/activation boundary.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - runtime
+  - bootstrap/database.yaml
 configMapGenerator:
   - name: txo-fabric-webui-sql-migrations
     namespace: txo-fabric-system
