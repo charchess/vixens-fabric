@@ -4,9 +4,12 @@ import { readFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 
 const root = new URL("../", import.meta.url);
-const contractPath = "apps/60-services/txo-fabric/openbao-fabric-v2-phase2-custody-bootstrap/contract.yaml";
+const phase2Tree = "apps/60-services/txo-fabric/openbao-fabric-v2-phase2-custody-bootstrap";
+const contractPath = `${phase2Tree}/contract.yaml`;
+const procedurePath = `${phase2Tree}/source-only-procedure.md`;
 const contractName = "openbao-fabric-v2-phase2-custody-bootstrap";
 const read = () => readFile(new URL(contractPath, root), "utf8");
+const readProcedure = () => readFile(new URL(procedurePath, root), "utf8");
 const expectedSpecKeys = ["executable", "runtimeCapability", "gitOpsConsumer", "phase1Selected", "requiresExistingAuthenticatedAuthority", "cannotBootstrapInitialCustodyAlone", "cannotUnblockCurrentRuntimeAlone", "policyEnvelopeIdentity", "custodyIssuanceReference", "receiptSchema", "refusedCapabilities"];
 const expectedReceiptAllowed = ["phase", "phaseHash", "policyName", "recordPath", "capabilityCategories", "custodyAttribution", "auditOutcome", "revoked"];
 const expectedReceiptForbidden = ["credential", "token", "wrappedPayload", "policyBody", "providerPayload", "root", "share"];
@@ -55,6 +58,19 @@ test("Phase 2 exact closed spec rejects capability mutation fixtures", async () 
     assert.throws(() => validateClosedSpec(source.replace(new RegExp(`(?:${capability},\\s*|,\\s*${capability}(?=\\]|,))`), "")), capability);
   }
   assert.throws(() => validateClosedSpec(source.replace("auth", "authorization")), "substitute auth");
+});
+
+test("Phase 2 source-only procedure forbids GitOps custody and gates any destructive test", async () => {
+  const procedure = await readProcedure();
+  for (const expected of [
+    "# OpenBao Fabric V2 Phase 2 — source-only procedure",
+    "GitOps may declare topology; it must not execute init, unseal, or custody.",
+    "working authenticated Infra custody identity",
+    "No Kubernetes Job, CronJob, Secret, ExternalSecret, SecretStore, Application, or runtime client is introduced by this phase.",
+    "do not delete or recreate the existing Fabric OpenBao, its PVCs, or its audit data",
+    "No live destructive test is authorized by this source-only procedure.",
+  ]) assert.ok(procedure.includes(expected), expected);
+  for (const forbidden of [/kubectl\s+(delete|apply|patch|replace|rollout|exec)/i, /bao\s+operator\s+(init|unseal)/i, /auth\/token\/create/i, /sys\/policies/i]) assert.doesNotMatch(procedure, forbidden);
 });
 
 test("Phase 2 contract is neither rendered nor selected by Phase 1 or another tracked consumer", () => {
