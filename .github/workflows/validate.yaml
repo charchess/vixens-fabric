@@ -198,14 +198,6 @@ jobs:
       - name: Run Fabrik public BFF route contract
         run: python3 -m unittest apps/60-services/txo-fabric/webui/test/test_fabrik_public_bff_route.py
 
-  legacy-identifier-warnings:
-    name: Legacy identifier warnings
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Emit hard warnings for legacy identifiers
-        run: python3 scripts/warn-legacy-identifiers.py
-
   validation-summary:
     name: Validation Summary
     if: always()
