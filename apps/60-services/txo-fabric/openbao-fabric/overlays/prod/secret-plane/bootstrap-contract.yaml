@@ -21,7 +21,7 @@ metadata:
     vixens.io/infra-test-tls-insecure: "false"
     vixens.io/infra-test-http-fallback: deny
     vixens.io/bootstrap-delivery: wrapping-one-use-5m
-    vixens.io/bootstrap-recovery: revoke-and-cleanup-test-only
+    vixens.io/bootstrap-remediation: revoke-and-cleanup-test-only
     vixens.io/bootstrap-revoke: immediate-on-stop-or-expiry
     vixens.io/runtime-deny-infra: "true"
     vixens.io/bridge-disabled-until-ready: "true"

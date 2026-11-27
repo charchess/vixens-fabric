@@ -642,7 +642,7 @@ func aiGatewayMigrationRecoveryMarkerName(bundle *fabricv1alpha1.TenantBundle) s
 	}
 	material := bundle.Spec.AIGateway.MigrationRecovery + ":" + strconv.FormatInt(bundle.Spec.AIGateway.MigrationRecoveryFailedGeneration, 10)
 	sum := sha256.Sum256([]byte(material))
-	return boundedDNSName("txo-ai-gateway-recovery-" + hex.EncodeToString(sum[:4]))
+	return boundedDNSName("txo-ai-gateway-remediation-" + hex.EncodeToString(sum[:4]))
 }
 
 func aiGatewayMigrationRecoveryMarkerOwnedBy(marker *corev1.ConfigMap, bundle *fabricv1alpha1.TenantBundle) bool {
@@ -670,7 +670,7 @@ func (r *TenantBundleReconciler) consumeLegacyAIGatewayMigrationRecovery(ctx con
 		return false, err
 	}
 	labels := aiGatewayRuntimeLabels(bundle)
-	labels["fabric.truxonline.io/ai-gateway-resource"] = "migration-recovery"
+	labels["fabric.truxonline.io/ai-gateway-resource"] = "migration-remediation"
 	marker := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: key.Namespace, Labels: labels}, Data: map[string]string{"recovery": bundle.Spec.AIGateway.MigrationRecovery, "failedGeneration": strconv.FormatInt(bundle.Spec.AIGateway.MigrationRecoveryFailedGeneration, 10)}}
 	if err := controllerutil.SetControllerReference(bundle, marker, r.Scheme); err != nil {
 		return false, err
@@ -723,7 +723,7 @@ func aiGatewayMigrationRecoveryTransitionMarkerName(bundle *fabricv1alpha1.Tenan
 	}
 	material := string(bundle.UID) + ":" + bundle.Spec.TenantID + ":" + transition.ID + ":" + strconv.FormatInt(int64(transition.ExpectedAttempt), 10) + ":" + transition.ExpectedJobUID
 	sum := sha256.Sum256([]byte(material))
-	return boundedDNSName("txo-ai-gateway-recovery-transition-" + hex.EncodeToString(sum[:8]))
+	return boundedDNSName("txo-ai-gateway-remediation-transition-" + hex.EncodeToString(sum[:8]))
 }
 
 func aiGatewayMigrationRecoveryTransitionMarkerOwnedBy(marker *corev1.ConfigMap, bundle *fabricv1alpha1.TenantBundle, transition *fabricv1alpha1.AIGatewayMigrationRecoveryTransition) bool {
@@ -744,7 +744,7 @@ func (r *TenantBundleReconciler) consumeAIGatewayMigrationRecoveryTransition(ctx
 		return false, err
 	}
 	labels := aiGatewayRuntimeLabels(bundle)
-	labels["fabric.truxonline.io/ai-gateway-resource"] = "migration-recovery-transition"
+	labels["fabric.truxonline.io/ai-gateway-resource"] = "migration-remediation-transition"
 	marker := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace, Labels: labels}, Data: map[string]string{"id": transition.ID, "tenantID": bundle.Spec.TenantID, "expectedAttempt": strconv.FormatInt(int64(transition.ExpectedAttempt), 10), "expectedJobUID": transition.ExpectedJobUID}}
 	if err := controllerutil.SetControllerReference(bundle, marker, r.Scheme); err != nil {
 		return false, err
@@ -795,7 +795,7 @@ func (r *TenantBundleReconciler) retiredAIGatewayRecoveryMarkerExact(
 			LabelManaged: "true",
 			LabelTenantID: bundle.Spec.TenantID,
 			LabelTenantName: bundle.Name,
-			"fabric.truxonline.io/ai-gateway-resource": "migration-recovery-transition",
+			"fabric.truxonline.io/ai-gateway-resource": "migration-remediation-transition",
 		}); err != nil {
 		return false, err
 	}

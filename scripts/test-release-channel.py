@@ -151,6 +151,16 @@ def main() -> int:
     legacy_warning = ROOT / "scripts/warn-legacy-identifiers.py"
     if legacy_warning.exists() or "warn-legacy-identifiers.py" in validate:
         raise AssertionError("legacy identifier warning path must remain removed")
+    forbidden_legacy_literals = ("synelia-recovery", "-recovery")
+    for source in ROOT.rglob("*"):
+        if source == Path(__file__) or not source.is_file() or ".git" in source.parts:
+            continue
+        try:
+            content = source.read_text()
+        except UnicodeDecodeError:
+            continue
+        if any(literal in content for literal in forbidden_legacy_literals):
+            raise AssertionError(f"{source.relative_to(ROOT)} retains a forbidden legacy identifier")
     require_in_order(
         validate,
         (
