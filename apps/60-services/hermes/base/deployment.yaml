@@ -133,8 +133,7 @@ spec:
             defaultMode: 0555
 
         - name: data
-          persistentVolumeClaim:
-            claimName: hermes-data-synelia-recovery
+          emptyDir: {}
 
         - name: hairem-files
           persistentVolumeClaim:

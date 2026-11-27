@@ -132,6 +132,35 @@ def main() -> int:
         require(validate, needle, validate_path)
     if "actions/checkout@v4" in validate or "actions/setup-node@v4" in validate:
         raise AssertionError("validate.yaml must use full immutable action SHAs, not moving v4 tags")
+
+    application_revisions = {
+        ROOT / "argocd/overlays/dev/apps/hermes-umi.yaml": "main",
+        ROOT / "argocd/overlays/dev/apps/txo-fabric.yaml": "main",
+        ROOT / "argocd/overlays/prod/apps/txo-fabric.yaml": "prod-stable",
+    }
+    application_paths = sorted((ROOT / "argocd").glob("overlays/*/apps/*.yaml"))
+    if set(application_paths) != set(application_revisions):
+        raise AssertionError("Fabric Application inventory must be explicit and complete")
+    for application_path in application_paths:
+        application = application_path.read_text()
+        expected_revision = application_revisions[application_path]
+        require(application, "repoURL: https://github.com/charchess/vixens-fabric.git", application_path)
+        require(application, f"targetRevision: {expected_revision}", application_path)
+        if re.search(r"targetRevision:\\s*[0-9a-f]{40}(?:\\s|$)", application):
+            raise AssertionError(f"{application_path.relative_to(ROOT)} must not pin a Git SHA")
+    legacy_warning = ROOT / "scripts/warn-legacy-identifiers.py"
+    if legacy_warning.exists() or "warn-legacy-identifiers.py" in validate:
+        raise AssertionError("legacy identifier warning path must remain removed")
+    forbidden_legacy_literals = ("synelia-recovery", "-recovery")
+    for source in ROOT.rglob("*"):
+        if source == Path(__file__) or not source.is_file() or ".git" in source.parts:
+            continue
+        try:
+            content = source.read_text()
+        except UnicodeDecodeError:
+            continue
+        if any(literal in content for literal in forbidden_legacy_literals):
+            raise AssertionError(f"{source.relative_to(ROOT)} retains a forbidden legacy identifier")
     require_in_order(
         validate,
         (

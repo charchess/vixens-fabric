@@ -13,7 +13,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/charchess/vixens-fabric.git
-    targetRevision: d09df0b47de4a69f56c71fb8b398994f6a73fc31
+    targetRevision: main
     path: apps/60-services/txo-fabric/overlays/dev
   destination:
     server: https://kubernetes.default.svc

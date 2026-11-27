@@ -327,23 +327,6 @@ Hindsight bank identity is part of the AgentIdentity contract. When tenant memor
 is configured, the operator exposes the resolved bank through the tenant-scoped
 Hindsight service while PostgreSQL remains hidden behind Hindsight from the agent.
 
-## Existing stateful data compatibility
-
-New agents use the canonical `hermes-<agentKey>-data` PVC mounted flat at
-`/opt/data`; there is no CSI migration or named-profile adoption step in
-normal tenant onboarding. Native storage is reconciled from the tenant's
-`spec.agentStorage` policy and the agent's immutable
-`runtime.storage.retentionPolicy`.
-
-Stored CRs carrying the retired `runtime.storage.adoptLegacyProfile: true`
-flag are rejected **fail-closed** by the controller. Their status and physical
-PVC data must not be silently rewritten, pruned, remounted or assumed migrated.
-For this exceptional case, use
-[the retained-Hermes state recovery procedure](../../../docs/guides/txo-fabric-hermes-state-recovery.md)
-and [ADR-044](../../../docs/adr/044-fabric-durable-active-volume-bindings.md).
-Historical CSI copy and adoption evidence belongs in incident/issue records,
-not the ordinary creation or reconciliation contract.
-
 ## Zero-tenant acceptance
 
 Without tenant declarations:
